@@ -14,7 +14,7 @@
 				{{* This is the Action menu where contact related actions like 'ignore', 'hide' can be performed *}}
 				<ul id="contact-edit-actions" class="nav nav-pills preferences">
 					<li class="dropdown pull-right">
-						<button type="button" class="btn btn-link btn-sm dropdown-toggle" id="contact-edit-actions-button" data-toggle="dropdown" aria-expanded="false">
+						<button type="button" class="btn btn-link dropdown-toggle" id="contact-edit-actions-button" data-toggle="dropdown" aria-expanded="false">
 							<i class="fa fa-angle-down" aria-hidden="true"></i>&nbsp;{{$contact_action_button}}
 						</button>
 
@@ -29,6 +29,7 @@
 							{{/if}}
 							<li role="presentation"><a role="menuitem" href="{{$contact_actions.block.url}}" title="{{$contact_actions.block.title}}">{{$contact_actions.block.label}}</a></li>
 							<li role="presentation"><a role="menuitem" href="{{$contact_actions.ignore.url}}" title="{{$contact_actions.ignore.title}}">{{$contact_actions.ignore.label}}</a></li>
+							<li role="presentation"><a role="menuitem" href="{{$contact_actions.collapse.url}}" title="{{$contact_actions.collapse.title}}">{{$contact_actions.collapse.label}}</a></li>
 							{{if $contact_actions.revoke_follow.url}}<li role="presentation"><button role="menuitem" type="button" class="btn-link" title="{{$contact_actions.revoke_follow.title}}" onclick="addToModal('{{$contact_actions.revoke_follow.url}}');">{{$contact_actions.revoke_follow.label}}</button></li>{{/if}}
 						</ul>
 					</li>
@@ -58,7 +59,9 @@
 						{{if $blocked && !$pending}}<li><div id="block-message">{{$blocked}}</div></li>{{/if}}
 						{{if $pending}}<li><div id="pending-message">{{$pending}}</div></li>{{/if}}
 						{{if $ignored}}<li><div id="ignore-message">{{$ignored}}</div></li>{{/if}}
+						{{if $collapsed}}<li><div id="collapse-message">{{$collapsed}}</div></li>{{/if}}
 						{{if $archived}}<li><div id="archive-message">{{$archived}}</div></li>{{/if}}
+						{{if $serverIgnored}}<li><div id="serverIgnored-message">{{$serverIgnored}} <a href="settings/server">{{$manageServers}}</a></div></li>{{/if}}
 					</ul>
 				</div> {{* End of contact-edit-status-wrapper *}}
 
@@ -185,6 +188,33 @@
 							</div>
 						</div>
 					</div>
+					{{/if}}
+					{{if $channel_settings_label}}
+						<div class="panel">
+							<div class="section-subtitle-wrapper panel-heading" role="tab" id="contact-edit-channel">
+								<h4>
+									<button class="btn-link accordion-toggle collapsed" data-toggle="collapse" data-parent="#contact-edit-tools" href="#contact-edit-channel-collapse" aria-expanded="false" aria-controls="contact-edit-channel-collapse">
+										{{$channel_settings_label}}
+									</button>
+								</h4>
+							</div>
+							<div id="contact-edit-channel-collapse" class="panel-body panel-collapse collapse" role="tabpanel" aria-labelledby="contact-edit-channel">
+								<div class="section-content-tools-wrapper">
+	
+									<label>{{$frequency_label}}</label>
+									{{include file="field_radio.tpl" field=$frequency_default}}
+									{{include file="field_radio.tpl" field=$frequency_always}}
+									{{include file="field_radio.tpl" field=$frequency_reduced}}
+									{{include file="field_radio.tpl" field=$frequency_never}}
+									<p>{{$frequency_description}}</p>
+
+									<div class="pull-right settings-submit-wrapper">
+										<button type="submit" name="submit" class="btn btn-primary" value="{{$submit}}">{{$submit}}</button>
+									</div>
+									<div class="clear"></div>
+								</div>
+							</div>
+						</div>
 					{{/if}}
 				</div>
 

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -79,13 +79,21 @@ class Network
 
 		if (in_array(parse_url($url, PHP_URL_SCHEME), ['https', 'http'])) {
 			$options = [HttpClientOptions::VERIFY => true, HttpClientOptions::TIMEOUT => $xrd_timeout];
-			$curlResult = DI::httpClient()->head($url, $options);
-	
+			try {
+				$curlResult = DI::httpClient()->head($url, $options);
+			} catch (\Exception $e) {
+				return false;
+			}
+
 			// Workaround for systems that can't handle a HEAD request. Don't retry on timeouts.
 			if (!$curlResult->isSuccess() && ($curlResult->getReturnCode() >= 400) && !in_array($curlResult->getReturnCode(), [408, 504])) {
-				$curlResult = DI::httpClient()->get($url, HttpClientAccept::DEFAULT, $options);
+				try {
+					$curlResult = DI::httpClient()->get($url, HttpClientAccept::DEFAULT, $options);
+				} catch (\Exception $e) {
+					return false;
+				}
 			}
-	
+
 			if (!$curlResult->isSuccess()) {
 				Logger::notice('Url not reachable', ['host' => $host, 'url' => $url]);
 				return false;
@@ -349,7 +357,7 @@ class Network
 						$pair = $param . '=' . str_replace(' ', '+', $value);
 						$url = str_replace($pair, '', $url);
 
-						// Third try: Maybey the url isn't encoded at all
+						// Third try: Maybe the url isn't encoded at all
 						$pair = $param . '=' . $value;
 						$url = str_replace($pair, '', $url);
 
@@ -376,6 +384,7 @@ class Network
 	 */
 	public static function addBasePath(string $url, string $basepath): string
 	{
+		$url = trim($url);
 		if (!empty(parse_url($url, PHP_URL_SCHEME)) || empty(parse_url($basepath, PHP_URL_SCHEME)) || empty($url) || empty(parse_url($url))) {
 			return $url;
 		}
@@ -499,7 +508,7 @@ class Network
 		$scheme    = $get('scheme');
 		$query     = $get('query');
 		$fragment  = $get('fragment');
-		$authority = ($userinfo !== null ? $userinfo . '@' : '') . 
+		$authority = ($userinfo !== null ? $userinfo . '@' : '') .
 						$get('host') .
 						($port ? ":$port" : '');
 
@@ -631,10 +640,11 @@ class Network
 	 * @param string $url
 	 *
 	 * @return bool
+	 * @deprecated since 2023.09, please use BaseUrl->isLocalUrl or BaseUrl->isLocalUri instead.
 	 */
 	public static function isLocalLink(string $url): bool
 	{
-		return (strpos(Strings::normaliseLink($url), Strings::normaliseLink(DI::baseUrl())) !== false);
+		return DI::baseUrl()->isLocalUrl($url);
 	}
 
 	/**
@@ -647,5 +657,25 @@ class Network
 	{
 		$scheme = parse_url($url, PHP_URL_SCHEME);
 		return !empty($scheme) && in_array($scheme, ['http', 'https']) && parse_url($url, PHP_URL_HOST);
+	}
+
+	/**
+	 * Creates an Uri object out of a given Uri string
+	 *
+	 * @param string|null $uri
+	 * @return UriInterface|null
+	 */
+	public static function createUriFromString(string $uri = null): ?UriInterface
+	{
+		if (empty($uri)) {
+			return null;
+		}
+
+		try {
+			return new Uri($uri);
+		} catch (\Exception $e) {
+			Logger::debug('Invalid URI', ['code' => $e->getCode(), 'message' => $e->getMessage(), 'uri' => $uri]);
+			return null;
+		}
 	}
 }

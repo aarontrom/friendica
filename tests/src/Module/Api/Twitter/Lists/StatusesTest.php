@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -38,8 +38,8 @@ class StatusesTest extends ApiTest
 	{
 		$this->expectException(BadRequestException::class);
 
-		(new Statuses(DI::dba(), DI::twitterStatus(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), []))
-			->run();
+		(new Statuses(DI::dba(), DI::twitterStatus(), DI::mstdnError(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), []))
+			->run($this->httpExceptionMock);
 	}
 
 	/**
@@ -47,8 +47,8 @@ class StatusesTest extends ApiTest
 	 */
 	public function testApiListsStatusesWithListId()
 	{
-		$response = (new Statuses(DI::dba(), DI::twitterStatus(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), []))
-			->run([
+		$response = (new Statuses(DI::dba(), DI::twitterStatus(), DI::mstdnError(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), []))
+			->run($this->httpExceptionMock, [
 				'list_id' => 1,
 				'page'    => -1,
 				'max_id'  => 10
@@ -67,8 +67,8 @@ class StatusesTest extends ApiTest
 	 */
 	public function testApiListsStatusesWithListIdAndRss()
 	{
-		$response = (new Statuses(DI::dba(), DI::twitterStatus(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), [], ['extension' => 'rss']))
-			->run([
+		$response = (new Statuses(DI::dba(), DI::twitterStatus(), DI::mstdnError(), DI::app(), DI::l10n(), DI::baseUrl(), DI::args(), DI::logger(), DI::profiler(), DI::apiResponse(), [], ['extension' => 'rss']))
+			->run($this->httpExceptionMock, [
 				'list_id' => 1
 			]);
 

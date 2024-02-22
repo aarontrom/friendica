@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,6 +22,7 @@
 namespace Friendica\Module\Search;
 
 use Friendica\App;
+use Friendica\Content\Conversation;
 use Friendica\Content\Nav;
 use Friendica\Content\Pager;
 use Friendica\Content\Text\HTML;
@@ -105,7 +106,7 @@ class Index extends BaseSearch
 			$search = '#' . trim(rawurldecode($_GET['tag']));
 		}
 
-		// contruct a wrapper for the search header
+		// construct a wrapper for the search header
 		$o = Renderer::replaceMacros(Renderer::getMarkupTemplate('content_wrapper.tpl'), [
 			'name' => 'search-header',
 			'$title' => DI::l10n()->t('Search'),
@@ -138,7 +139,7 @@ class Index extends BaseSearch
 						break;
 					case 'contacts':
 						return self::performContactSearch($search, '@');
-					case 'forums':
+					case 'groups':
 						return self::performContactSearch($search, '!');
 				}
 			}
@@ -172,7 +173,7 @@ class Index extends BaseSearch
 		$pager = new Pager(DI::l10n(), DI::args()->getQueryString(), $itemsPerPage);
 
 		if ($tag) {
-			Logger::info('Start tag search.', ['q' => $search]);
+			Logger::info('Start tag search.', ['q' => $search, 'start' => $pager->getStart(), 'items' => $pager->getItemsPerPage(), 'last' => $last_uriid]);
 			$uriids = Tag::getURIIdListByTag($search, DI::userSession()->getLocalUserId(), $pager->getStart(), $pager->getItemsPerPage(), $last_uriid);
 			$count = Tag::countByTag($search, DI::userSession()->getLocalUserId());
 		} else {
@@ -184,7 +185,7 @@ class Index extends BaseSearch
 		if (!empty($uriids)) {
 			$condition = ["(`uid` = ? OR (`uid` = ? AND NOT `global`))", 0, DI::userSession()->getLocalUserId()];
 			$condition = DBA::mergeConditions($condition, ['uri-id' => $uriids]);
-			$params = ['order' => ['id' => true]];
+			$params = ['order' => ['uri-id' => true]];
 			$items = Post::toArray(Post::selectForUser(DI::userSession()->getLocalUserId(), Item::DISPLAY_FIELDLIST, $condition, $params));
 		}
 
@@ -212,7 +213,7 @@ class Index extends BaseSearch
 
 		Logger::info('Start Conversation.', ['q' => $search]);
 
-		$o .= DI::conversation()->create($items, 'search', false, false, 'commented', DI::userSession()->getLocalUserId());
+		$o .= DI::conversation()->render($items, Conversation::MODE_SEARCH, false, false, 'commented', DI::userSession()->getLocalUserId());
 
 		if (DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'infinite_scroll')) {
 			$o .= HTML::scrollLoader();

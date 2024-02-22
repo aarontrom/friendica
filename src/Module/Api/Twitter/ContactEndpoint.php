@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -38,11 +38,11 @@ abstract class ContactEndpoint extends BaseApi
 	const DEFAULT_COUNT = 20;
 	const MAX_COUNT = 200;
 
-	public function __construct(App $app, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, ApiResponse $response, array $server, array $parameters = [])
+	public function __construct(\Friendica\Factory\Api\Mastodon\Error $errorFactory, App $app, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, ApiResponse $response, array $server, array $parameters = [])
 	{
-		parent::__construct($app, $l10n, $baseUrl, $args, $logger, $profiler, $response, $server, $parameters);
+		parent::__construct($errorFactory, $app, $l10n, $baseUrl, $args, $logger, $profiler, $response, $server, $parameters);
 
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 	}
 
 	/**
@@ -62,7 +62,7 @@ abstract class ContactEndpoint extends BaseApi
 			if (!$screen_name) {
 				$contact = Contact::getById($contact_id, ['nick', 'url']);
 				// We don't have the followers of remote accounts so we check for locality
-				if (empty($contact) || !Strings::startsWith($contact['url'], DI::baseUrl()->get())) {
+				if (empty($contact) || !Strings::startsWith($contact['url'], DI::baseUrl())) {
 					throw new HTTPException\NotFoundException(DI::l10n()->t('Contact not found'));
 				}
 

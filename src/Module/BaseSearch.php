@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -23,6 +23,7 @@ namespace Friendica\Module;
 
 use Friendica\BaseModule;
 use Friendica\Content\Pager;
+use Friendica\Core\Logger;
 use Friendica\Core\Renderer;
 use Friendica\Core\Search;
 use Friendica\DI;
@@ -62,21 +63,16 @@ class BaseSearch extends BaseModule
 		}
 
 		$header = '';
+		$results = new ResultList();
 
 		if (strpos($search, '@') === 0) {
 			$search  = trim(substr($search, 1));
 			$type    = Search::TYPE_PEOPLE;
 			$header  = DI::l10n()->t('People Search - %s', $search);
-
-			if (strrpos($search, '@') > 0) {
-				$results = Search::getContactsFromProbe(Network::convertToIdn($search));
-			}
-		}
-
-		if (strpos($search, '!') === 0) {
+		} elseif (strpos($search, '!') === 0) {
 			$search = trim(substr($search, 1));
-			$type   = Search::TYPE_FORUM;
-			$header = DI::l10n()->t('Forum Search - %s', $search);
+			$type   = Search::TYPE_GROUP;
+			$header = DI::l10n()->t('Group Search - %s', $search);
 		}
 
 		$search = Network::convertToIdn($search);
@@ -91,12 +87,18 @@ class BaseSearch extends BaseModule
 
 		$pager = new Pager(DI::l10n(), DI::args()->getQueryString(), $itemsPerPage);
 
-		if ($localSearch && empty($results)) {
-			$pager->setItemsPerPage(80);
-			$results = Search::getContactsFromLocalDirectory($search, $type, $pager->getStart(), $pager->getItemsPerPage());
-		} elseif (Search::getGlobalDirectory() && empty($results)) {
+		if (!$results->getTotal() && !$localSearch && Search::getGlobalDirectory()) {
 			$results = Search::getContactsFromGlobalDirectory($search, $type, $pager->getPage());
 			$pager->setItemsPerPage($results->getItemsPage());
+		}
+
+		if (!$results->getTotal()) {
+			$pager->setItemsPerPage(80);
+			$results = Search::getContactsFromLocalDirectory($search, $type, $pager->getStart(), $pager->getItemsPerPage());
+		}
+
+		if (!$results->getTotal()) {
+			$results = Search::getContactsFromProbe(Network::convertToIdn($search), $type == Search::TYPE_GROUP);
 		}
 
 		return self::printResult($results, $pager, $header);
@@ -120,11 +122,17 @@ class BaseSearch extends BaseModule
 			return '';
 		}
 
+		$filtered = 0;
+
 		$entries = [];
 		foreach ($results->getResults() as $result) {
-
 			// in case the result is a contact result, add a contact-specific entry
 			if ($result instanceof ContactResult) {
+				if (Network::isUriBlocked($result->getUrl())) {
+					$filtered++;
+					continue;
+				}
+
 				$contact = Model\Contact::getByURLForUser($result->getUrl(), DI::userSession()->getLocalUserId());
 				if (!empty($contact)) {
 					$entries[] = Contact::getContactTemplateVars($contact);
@@ -134,7 +142,11 @@ class BaseSearch extends BaseModule
 
 		$tpl = Renderer::getMarkupTemplate('contact/list.tpl');
 		return Renderer::replaceMacros($tpl, [
-			'title'     => $header,
+			'$title'    => $header,
+			'$filtered' => $filtered ? DI::l10n()->tt(
+				'%d result was filtered out because your node blocks the domain it is registered on. You can review the list of domains your node is currently blocking in the <a href="/friendica">About page</a>.',
+				'%d results were filtered out because your node blocks the domain they are registered on. You can review the list of domains your node is currently blocking in the <a href="/friendica">About page</a>.',
+				$filtered) : '',
 			'$contacts' => $entries,
 			'$paginate' => $pager->renderFull($results->getTotal()),
 		]);

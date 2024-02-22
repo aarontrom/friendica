@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -23,7 +23,6 @@ namespace Friendica\Model;
 
 use BadMethodCallException;
 use Friendica\Core\Logger;
-use Friendica\Core\System;
 use Friendica\Database\Database;
 use Friendica\Database\DBA;
 use Friendica\DI;
@@ -36,10 +35,10 @@ class Post
 	 *
 	 * @param integer $uri_id
 	 * @param array   $fields
-	 * @return int    ID of inserted post
+	 * @return bool   Success of the insert process
 	 * @throws \Exception
 	 */
-	public static function insert(int $uri_id, array $data = []): int
+	public static function insert(int $uri_id, array $data = []): bool
 	{
 		if (empty($uri_id)) {
 			throw new BadMethodCallException('Empty URI_id');
@@ -50,11 +49,7 @@ class Post
 		// Additionally assign the key fields
 		$fields['uri-id'] = $uri_id;
 
-		if (!DBA::insert('post', $fields, Database::INSERT_IGNORE)) {
-			return 0;
-		}
-
-		return DBA::lastInsertId();
+		return DBA::insert('post', $fields, Database::INSERT_IGNORE);
 	}
 
 	/**
@@ -224,6 +219,46 @@ class Post
 			DBA::close($result);
 			return $row;
 		}
+	}
+
+	/**
+	 * Retrieve a single record from the post-user-view view and returns it in an associative array
+	 * When the requested record is a reshare activity, the system fetches the reshared original post.
+	 * Otherwise the function reacts similar to selectFirst
+	 *
+	 * @param array $fields
+	 * @param array $condition
+	 * @param array $params
+	 * @param bool  $user_mode true = post-user-view, false = post-view
+	 * @return bool|array
+	 * @throws \Exception
+	 * @see   DBA::select
+	 */
+	public static function selectOriginal(array $fields = [], array $condition = [], array $params = [])
+	{
+		$original_fields = $fields;
+		$remove = [];
+		if (!empty($fields)) {
+			foreach (['gravity', 'verb', 'thr-parent-id', 'uid'] as $field) {
+				if (!in_array($field, $fields)) {
+					$fields[] = $field;
+					$remove[] = $field;
+				}
+			}
+		}
+		$result = self::selectFirst($fields, $condition, $params);
+		if (empty($result)) {
+			return $result;
+		}
+
+		if (($result['gravity'] != Item::GRAVITY_ACTIVITY) || ($result['verb'] != Activity::ANNOUNCE)) {
+			foreach ($remove as $field) {
+				unset($result[$field]);
+			}
+			return $result;
+		}
+
+		return self::selectFirst($original_fields, ['uri-id' => $result['thr-parent-id'], 'uid' => [0, $result['uid']]], $params);
 	}
 
 	/**
@@ -412,13 +447,11 @@ class Post
 			AND NOT `author-blocked` AND NOT `owner-blocked`
 			AND (NOT `causer-blocked` OR `causer-id` = ? OR `causer-id` IS NULL) AND NOT `contact-blocked`
 			AND ((NOT `contact-readonly` AND NOT `contact-pending` AND (`contact-rel` IN (?, ?)))
-				OR `self` OR `gravity` != ? OR `contact-uid` = ?)
-			AND NOT `" . $view . "`.`uri-id` IN (SELECT `uri-id` FROM `post-user` WHERE `uid` = ? AND `hidden`)
-			AND NOT `author-id` IN (SELECT `cid` FROM `user-contact` WHERE `uid` = ? AND `blocked` AND `cid` = `author-id`)
-			AND NOT `owner-id` IN (SELECT `cid` FROM `user-contact` WHERE `uid` = ? AND `blocked` AND `cid` = `owner-id`)
-			AND NOT (`gravity` = ? AND `author-id` IN (SELECT `cid` FROM `user-contact` WHERE `uid` = ? AND `ignored` AND `cid` = `author-id`))
-			AND NOT (`gravity` = ? AND `owner-id` IN (SELECT `cid` FROM `user-contact` WHERE `uid` = ? AND `ignored` AND `cid` = `owner-id`))",
-				0, Contact::SHARING, Contact::FRIEND, Item::GRAVITY_PARENT, 0, $uid, $uid, $uid, Item::GRAVITY_PARENT, $uid, Item::GRAVITY_PARENT, $uid]);
+				OR `self` OR `contact-uid` = ?)
+			AND NOT EXISTS(SELECT `uri-id` FROM `post-user`    WHERE `uid` = ? AND `uri-id` = " . DBA::quoteIdentifier($view) . ".`uri-id` AND `hidden`)
+			AND NOT EXISTS(SELECT `cid`    FROM `user-contact` WHERE `uid` = ? AND `cid` IN (`author-id`, `owner-id`) AND (`blocked` OR `ignored`))
+			AND NOT EXISTS(SELECT `gsid`   FROM `user-gserver` WHERE `uid` = ? AND `gsid` IN (`author-gsid`, `owner-gsid`, `causer-gsid`) AND `ignored`)",
+				0, Contact::SHARING, Contact::FRIEND, 0, $uid, $uid, $uid]);
 
 		$select_string = implode(', ', array_map([DBA::class, 'quoteIdentifier'], $selected));
 
@@ -464,6 +497,23 @@ class Post
 	}
 
 	/**
+	 * Select rows from the post-timeline-view view for a given user
+	 * This function is used for API calls.
+	 *
+	 * @param integer $uid       User ID
+	 * @param array   $selected  Array of selected fields, empty for all
+	 * @param array   $condition Array of fields for condition
+	 * @param array   $params    Array of several parameters
+	 *
+	 * @return boolean|object
+	 * @throws \Exception
+	 */
+	public static function selectTimelineForUser(int $uid, array $selected = [], array $condition = [], array $params = [])
+	{
+		return self::selectViewForUser('post-timeline-view', $uid, $selected, $condition, $params);
+	}
+
+	/**
 	 * Select rows from the post-thread-user-view view for a given user
 	 *
 	 * @param integer $uid       User ID
@@ -506,6 +556,46 @@ class Post
 	}
 
 	/**
+	 * Retrieve a single record from the post-user-view view for a given user and returns it in an associative array
+	 * When the requested record is a reshare activity, the system fetches the reshared original post.
+	 * Otherwise the function reacts similar to selectFirstForUser
+	 *
+	 * @param integer $uid User ID
+	 * @param array   $selected
+	 * @param array   $condition
+	 * @param array   $params
+	 * @return bool|array
+	 * @throws \Exception
+	 * @see   DBA::select
+	 */
+	public static function selectOriginalForUser(int $uid, array $selected = [], array $condition = [], array $params = [])
+	{
+		$original_selected = $selected;
+		$remove = [];
+		if (!empty($selected)) {
+			foreach (['gravity', 'verb', 'thr-parent-id'] as $field) {
+				if (!in_array($field, $selected)) {
+					$selected[] = $field;
+					$remove[]   = $field;
+				}
+			}
+		}
+		$result = self::selectFirstForUser($uid, $selected, $condition, $params);
+		if (empty($result)) {
+			return $result;
+		}
+
+		if (($result['gravity'] != Item::GRAVITY_ACTIVITY) || ($result['verb'] != Activity::ANNOUNCE)) {
+			foreach ($remove as $field) {
+				unset($result[$field]);
+			}
+			return $result;
+		}
+
+		return self::selectFirstForUser($uid, $original_selected, ['uri-id' => $result['thr-parent-id'], 'uid' => [0, $uid]], $params);
+	}
+
+	/**
 	 * Update existing post entries
 	 *
 	 * @param array $fields    The fields that are to be changed
@@ -520,7 +610,7 @@ class Post
 	{
 		$affected = 0;
 
-		Logger::info('Start Update', ['fields' => $fields, 'condition' => $condition, 'uid' => DI::userSession()->getLocalUserId(),'callstack' => System::callstack(10)]);
+		Logger::info('Start Update', ['fields' => $fields, 'condition' => $condition, 'uid' => DI::userSession()->getLocalUserId()]);
 
 		// Don't allow changes to fields that are responsible for the relation between the records
 		unset($fields['id']);

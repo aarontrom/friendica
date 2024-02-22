@@ -77,11 +77,11 @@ Additionally to the setting in the admin panel, you can decide if registrations 
 To enable invitation based registration, you have to set the `invitation_only` setting to `true` in the `system` section of the [config/local.config.php](/help/Config) file.
 If you want to use this method, the registration policy has to be set to either *open* or *requires approval*.
 
-#### Check Full Names
+#### Check Display Names
 
 You may find a lot of spammers trying to register on your site.
-During testing we discovered that since these registrations were automatic, the "Full Name" field was often set to just an account name with no space between first and last name.
-If you would like to support people with only one name as their full name, you may change this setting to true.
+During testing we discovered that since these registrations were automatic, the "Display Name" field was often set to just an account name with no space between first and last name.
+If you would like to support people with only one name as their display name, you can leave this setting set to false.
 Default is false.
 
 #### OpenID
@@ -104,12 +104,12 @@ Default is false.
 #### File storage backend
 
 Set the backend used by Friendica to store uploaded file data.
-Two storage backends are avaiable with Friendica:
+Two storage backends are available with Friendica:
 
 - **Database** : Data is stored in a dedicated table in database (`storage`)
 - **Filesystem** : Data is stored as file on the filesystem.
 
-More storage backends can be avaiable from third-party addons.
+More storage backends can be available from third-party addons.
 If you use those, please refer to the documentation of those addons for further information.
 
 Default value is 'Database (legacy)': it's the legacy way used to store data directly in database.

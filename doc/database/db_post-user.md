@@ -34,7 +34,7 @@ Fields
 | event-id          | Used to link to the event.id                                                      | int unsigned       | YES  |     | NULL                |                |
 | unseen            | post has not been seen                                                            | boolean            | NO   |     | 1                   |                |
 | hidden            | Marker to hide the post from the user                                             | boolean            | NO   |     | 0                   |                |
-| notification-type |                                                                                   | tinyint unsigned   | NO   |     | 0                   |                |
+| notification-type |                                                                                   | smallint unsigned  | NO   |     | 0                   |                |
 | wall              | This item was posted to the wall of uid                                           | boolean            | NO   |     | 0                   |                |
 | origin            | item originated at this site                                                      | boolean            | NO   |     | 0                   |                |
 | psid              | ID of the permission set of this post                                             | int unsigned       | YES  |     | NULL                |                |
@@ -58,7 +58,8 @@ Indexes
 | event-id             | event-id                |
 | psid                 | psid                    |
 | author-id_uid        | author-id, uid          |
-| author-id_received   | author-id, received     |
+| author-id_created    | author-id, created      |
+| owner-id_created     | owner-id, created       |
 | parent-uri-id_uid    | parent-uri-id, uid      |
 | uid_wall_received    | uid, wall, received     |
 | uid_contactid        | uid, contact-id         |

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -38,6 +38,8 @@ class Xrd extends BaseModule
 {
 	protected function rawContent(array $request = [])
 	{
+		header('Vary: Accept', false);
+
 		// @TODO: Replace with parameter from router
 		if (DI::args()->getArgv()[0] == 'xrd') {
 			if (empty($_GET['uri'])) {
@@ -65,14 +67,22 @@ class Xrd extends BaseModule
 
 		if (substr($uri, 0, 4) === 'http') {
 			$name = ltrim(basename($uri), '~');
+			$host = parse_url($uri, PHP_URL_HOST);
 		} else {
 			$local = str_replace('acct:', '', $uri);
 			if (substr($local, 0, 2) == '//') {
 				$local = substr($local, 2);
 			}
 
-			$name = substr($local, 0, strpos($local, '@'));
+			list($name, $host) = explode('@', $local);
 		}
+
+		if (!empty($host) && $host !== DI::baseUrl()->getHost()) {
+			DI::logger()->notice('Invalid host name for xrd query',['host' => $host, 'uri' => $uri]);
+			throw new NotFoundException('Invalid host name for xrd query: ' . $host);
+		}
+
+		header('Vary: Accept', false);
 
 		if ($name == User::getActorName()) {
 			$owner = User::getSystemAccount();
@@ -105,7 +115,7 @@ class Xrd extends BaseModule
 
 	private function printSystemJSON(array $owner)
 	{
-		$baseURL = $this->baseUrl->get();
+		$baseURL = (string)$this->baseUrl;
 		$json = [
 			'subject' => 'acct:' . $owner['addr'],
 			'aliases' => [$owner['url']],
@@ -146,12 +156,12 @@ class Xrd extends BaseModule
 			]
 		];
 		header('Access-Control-Allow-Origin: *');
-		System::jsonExit($json, 'application/jrd+json; charset=utf-8');
+		$this->jsonExit($json, 'application/jrd+json; charset=utf-8');
 	}
 
 	private function printJSON(string $alias, array $owner, array $avatar)
 	{
-		$baseURL = $this->baseUrl->get();
+		$baseURL = (string)$this->baseUrl;
 
 		$json = [
 			'subject' => 'acct:' . $owner['addr'],
@@ -223,16 +233,14 @@ class Xrd extends BaseModule
 		];
 
 		header('Access-Control-Allow-Origin: *');
-		System::jsonExit($json, 'application/jrd+json; charset=utf-8');
+		$this->jsonExit($json, 'application/jrd+json; charset=utf-8');
 	}
 
 	private function printXML(string $alias, array $owner, array $avatar)
 	{
-		$baseURL = $this->baseUrl->get();
+		$baseURL = (string)$this->baseUrl;
 
-		$xml = null;
-
-		XML::fromArray([
+		$xmlString = XML::fromArray([
 			'XRD' => [
 				'@attributes' => [
 					'xmlns'    => 'http://docs.oasis-open.org/ns/xri/xrd-1.0',
@@ -319,10 +327,9 @@ class Xrd extends BaseModule
 					]
 				],
 			],
-		], $xml);
+		]);
 
 		header('Access-Control-Allow-Origin: *');
-
-		System::httpExit($xml->saveXML(), Response::TYPE_XML, 'application/xrd+xml');
+		$this->httpExit($xmlString, Response::TYPE_XML, 'application/xrd+xml');
 	}
 }

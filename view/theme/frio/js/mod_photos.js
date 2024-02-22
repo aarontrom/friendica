@@ -1,11 +1,11 @@
 // @license magnet:?xt=urn:btih:0b31508aeb0634b347b8270c7bee4d411b5d4109&dn=agpl-3.0.txt AGPLv3-or-later
 
 $(document).ready(function () {
-	$("#contact_allow, #contact_deny, #group_allow, #group_deny")
+	$("#contact_allow, #contact_deny, #circle_allow, #circle_deny")
 		.change(function () {
 			var selstr;
 			$(
-				"#contact_allow option:selected, #contact_deny option:selected, #group_allow option:selected, #group_deny option:selected",
+				"#contact_allow option:selected, #contact_deny option:selected, #circle_allow option:selected, #circle_deny option:selected",
 			).each(function () {
 				selstr = $(this).html();
 				$("#jot-perms-icon").removeClass("unlock").addClass("lock");
@@ -42,7 +42,7 @@ $(window).load(function () {
 	var pheight = $("#photo-photo img").height();
 	var pwidth = $("#photo-photo img").width();
 
-	// Append the diminsons of the picture to the css of the photo-photo div
+	// Append the dimensions of the picture to the css of the photo-photo div
 	// we do this to make it possible to have overlay navigation buttons for the photo
 	$("#photo-photo").css({
 		width: pwidth,

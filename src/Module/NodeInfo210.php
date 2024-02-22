@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -52,7 +52,6 @@ class NodeInfo210 extends BaseModule
 		$nodeinfo = [
 			'version' => '1.0',
 			'server'  => [
-				'baseUrl'  => $this->baseUrl->get(),
 				'name'     => $this->config->get('config', 'sitename'),
 				'software' => 'friendica',
 				'version'  => App::VERSION . '-' . DB_UPDATE_VERSION,
@@ -70,10 +69,6 @@ class NodeInfo210 extends BaseModule
 
 		if (empty($this->config->get('system', 'ostatus_disabled'))) {
 			$nodeinfo['protocols'][] = 'ostatus';
-		}
-
-		if (Addon::isEnabled('twitter')) {
-			$nodeinfo['services']['inbound'][] = 'twitter';
 		}
 
 		$nodeinfo['services']['inbound'][]  = 'atom1.0';

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -29,7 +29,7 @@ use Friendica\Core\Search;
 use Friendica\Database\DBA;
 use Friendica\DI;
 use Friendica\Model\Contact;
-use Friendica\Model\Group;
+use Friendica\Model\Circle;
 use Friendica\Model\Item;
 use Friendica\Model\Post;
 use Friendica\Model\Profile;
@@ -59,7 +59,7 @@ class Widget
 	/**
 	 * Return Find People widget
 	 *
-	 * @return string HTML code respresenting "People Widget"
+	 * @return string HTML code representing "People Widget"
 	 */
 	public static function findPeople(): string
 	{
@@ -102,7 +102,7 @@ class Widget
 	public static function unavailableNetworks(): array
 	{
 		// Always hide content from these networks
-		$networks = [Protocol::PHANTOM, Protocol::FACEBOOK, Protocol::APPNET, Protocol::ZOT];
+		$networks = [Protocol::PHANTOM, Protocol::FACEBOOK, Protocol::APPNET, Protocol::TWITTER, Protocol::ZOT];
 
 		if (!Addon::isEnabled("discourse")) {
 			$networks[] = Protocol::DISCOURSE;
@@ -116,8 +116,8 @@ class Widget
 			$networks[] = Protocol::PUMPIO;
 		}
 
-		if (!Addon::isEnabled("twitter")) {
-			$networks[] = Protocol::TWITTER;
+		if (!Addon::isEnabled("tumblr")) {
+			$networks[] = Protocol::TUMBLR;
 		}
 
 		if (DI::config()->get("system", "ostatus_disabled")) {
@@ -174,6 +174,10 @@ class Widget
 			$baseUrl = trim($baseUrl, '?') . '?';
 		}
 
+		array_walk($options, function (&$value) {
+			$value['ref'] = rawurlencode($value['ref']);
+		});
+
 		return Renderer::replaceMacros(Renderer::getMarkupTemplate('widget/filter.tpl'), [
 			'$type'      => $type,
 			'$title'     => $title,
@@ -186,29 +190,29 @@ class Widget
 	}
 
 	/**
-	 * Return group membership widget
+	 * Return circle membership widget
 	 *
 	 * @param string $baseurl
 	 * @param string $selected
 	 * @return string
 	 * @throws \Exception
 	 */
-	public static function groups(string $baseurl, string $selected = ''): string
+	public static function circles(string $baseurl, string $selected = ''): string
 	{
 		if (!DI::userSession()->getLocalUserId()) {
 			return '';
 		}
 
-		$options = array_map(function ($group) {
+		$options = array_map(function ($circle) {
 			return [
-				'ref'  => $group['id'],
-				'name' => $group['name']
+				'ref'  => $circle['id'],
+				'name' => $circle['name']
 			];
-		}, Group::getByUserId(DI::userSession()->getLocalUserId()));
+		}, Circle::getByUserId(DI::userSession()->getLocalUserId()));
 
 		return self::filter(
-			'group',
-			DI::l10n()->t('Groups'),
+			'circle',
+			DI::l10n()->t('Circles'),
 			'',
 			DI::l10n()->t('Everyone'),
 			$baseurl,
@@ -235,6 +239,7 @@ class Widget
 			['ref' => 'followers', 'name' => DI::l10n()->t('Followers')],
 			['ref' => 'following', 'name' => DI::l10n()->t('Following')],
 			['ref' => 'mutuals', 'name' => DI::l10n()->t('Mutual friends')],
+			['ref' => 'nothing', 'name' => DI::l10n()->t('No relationship')],
 		];
 
 		return self::filter(
@@ -461,6 +466,10 @@ class Widget
 
 		if ($dthen) {
 			// Set the start and end date to the beginning of the month
+			$cutoffday = $dthen;
+			$thisday = substr($dnow, 4);
+			$nextday = date('Y-m-d', strtotime($dnow . ' + 1 day'));
+			$nextday = substr($nextday, 4);
 			$dnow = substr($dnow, 0, 8) . '01';
 			$dthen = substr($dthen, 0, 8) . '01';
 
@@ -493,7 +502,7 @@ class Widget
 		$cutoff_year = intval(DateTimeFormat::localNow('Y')) - $visible_years;
 		$cutoff = array_key_exists($cutoff_year, $ret);
 
-		$o = Renderer::replaceMacros(Renderer::getMarkupTemplate('widget/posted_date.tpl'),[
+		$o = Renderer::replaceMacros(Renderer::getMarkupTemplate('widget/posted_date.tpl'), [
 			'$title' => DI::l10n()->t('Archives'),
 			'$size' => $visible_years,
 			'$cutoff_year' => $cutoff_year,
@@ -501,7 +510,11 @@ class Widget
 			'$url' => $url,
 			'$dates' => $ret,
 			'$showless' => DI::l10n()->t('show less'),
-			'$showmore' => DI::l10n()->t('show more')
+			'$showmore' => DI::l10n()->t('show more'),
+			'$onthisdate' => DI::l10n()->t('On this date'),
+			'$thisday' => $thisday,
+			'$nextday' => $nextday,
+			'$cutoffday' => $cutoffday
 		]);
 
 		return $o;
@@ -521,10 +534,66 @@ class Widget
 			['ref' => 'person', 'name' => DI::l10n()->t('Persons')],
 			['ref' => 'organisation', 'name' => DI::l10n()->t('Organisations')],
 			['ref' => 'news', 'name' => DI::l10n()->t('News')],
-			['ref' => 'community', 'name' => DI::l10n()->t('Forums')],
+			['ref' => 'community', 'name' => DI::l10n()->t('Groups')],
 		];
 
-		return self::filter('accounttype', DI::l10n()->t('Account Types'), '',
-			DI::l10n()->t('All'), $base, $accounts, $accounttype);
+		return self::filter(
+			'accounttype',
+			DI::l10n()->t('Account Types'),
+			'',
+			DI::l10n()->t('All'),
+			$base,
+			$accounts,
+			$accounttype
+		);
+	}
+
+	/**
+	 * Get a list of all channels
+	 *
+	 * @param string $base
+	 * @param string $channelname
+	 * @param integer $uid
+	 * @return string
+	 */
+	public static function channels(string $base, string $channelname, int $uid): string
+	{
+		$channels = [];
+
+		$enabled = DI::pConfig()->get($uid, 'system', 'enabled_timelines', []);
+
+		foreach (DI::NetworkFactory()->getTimelines('') as $channel) {
+			if (empty($enabled) || in_array($channel->code, $enabled)) {
+				$channels[] = ['ref' => $channel->code, 'name' => $channel->label];
+			}
+		}
+
+		foreach (DI::ChannelFactory()->getTimelines($uid) as $channel) {
+			if (empty($enabled) || in_array($channel->code, $enabled)) {
+				$channels[] = ['ref' => $channel->code, 'name' => $channel->label];
+			}
+		}
+
+		foreach (DI::userDefinedChannel()->selectByUid($uid) as $channel) {
+			if (empty($enabled) || in_array($channel->code, $enabled)) {
+				$channels[] = ['ref' => $channel->code, 'name' => $channel->label];
+			}
+		}
+
+		foreach (DI::CommunityFactory()->getTimelines(true) as $community) {
+			if (empty($enabled) || in_array($community->code, $enabled)) {
+				$channels[] = ['ref' => $community->code, 'name' => $community->label];
+			}
+		}
+
+		return self::filter(
+			'channel',
+			DI::l10n()->t('Channels'),
+			'',
+			'',
+			$base,
+			$channels,
+			$channelname
+		);
 	}
 }

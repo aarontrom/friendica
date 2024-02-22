@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -28,7 +28,6 @@ use Friendica\Model\Contact;
 use Friendica\Model\Post;
 use Friendica\Model\Verb;
 use Friendica\Module\BaseApi;
-use Friendica\Navigation\Notifications\Entity;
 use Friendica\Object\Api\Mastodon\Notification;
 use Friendica\Protocol\Activity;
 
@@ -42,16 +41,16 @@ class Notifications extends BaseApi
 	 */
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = self::getCurrentUserID();
 
 		if (!empty($this->parameters['id'])) {
 			$id = $this->parameters['id'];
 			try {
 				$notification = DI::notification()->selectOneForUser($uid, ['id' => $id]);
-				System::jsonExit(DI::mstdnNotification()->createFromNotification($notification));
+				$this->jsonExit(DI::mstdnNotification()->createFromNotification($notification, self::appSupportsQuotes()));
 			} catch (\Exception $e) {
-				DI::mstdnError()->RecordNotFound();
+				$this->logAndJsonError(404, $this->errorFactory->RecordNotFound());
 			}
 		}
 
@@ -59,19 +58,22 @@ class Notifications extends BaseApi
 			'max_id'        => 0,     // Return results older than this ID
 			'since_id'      => 0,     // Return results newer than this ID
 			'min_id'        => 0,     // Return results immediately newer than this ID
-			'limit'         => 20,    // Maximum number of results to return (default 20)
+			'limit'         => 15,    // Maximum number of results to return. Defaults to 15 notifications. Max 30 notifications.
 			'exclude_types' => [],    // Array of types to exclude (follow, favourite, reblog, mention, poll, follow_request)
 			'account_id'    => 0,     // Return only notifications received from this account
 			'with_muted'    => false, // Pleroma extension: return activities by muted (not by blocked!) users.
-			'count'         => 0,
-			'include_all'   => false  // Include dismissed and undismissed
+			'include_all'   => false,  // Include dismissed and undismissed
+			'summary'       => false,
 		], $request);
 
 		$params = ['order' => ['id' => true]];
 
-		$condition = ['uid' => $uid, 'dismissed' => false];
-		if ($request['include_all']) {
-			$condition = ['uid' => $uid];
+		$condition = ["`uid` = ? AND (NOT `type` IN (?, ?))", $uid,
+			Post\UserNotification::TYPE_ACTIVITY_PARTICIPATION,
+			Post\UserNotification::TYPE_COMMENT_PARTICIPATION];
+
+		if (!$request['include_all']) {
+			$condition = DBA::mergeConditions($condition, ['dismissed' => false]);
 		}
 
 		if (!empty($request['account_id'])) {
@@ -82,15 +84,21 @@ class Notifications extends BaseApi
 		}
 
 		if (in_array(Notification::TYPE_INTRODUCTION, $request['exclude_types'])) {
-			$condition = DBA::mergeConditions($condition,
+			$condition = DBA::mergeConditions(
+				$condition,
 				["(`vid` != ? OR `type` != ? OR NOT `actor-id` IN (SELECT `id` FROM `contact` WHERE `pending`))",
-				Verb::getID(Activity::FOLLOW), Post\UserNotification::TYPE_NONE]);
+					Verb::getID(Activity::FOLLOW),
+					Post\UserNotification::TYPE_NONE]
+			);
 		}
 
 		if (in_array(Notification::TYPE_FOLLOW, $request['exclude_types'])) {
-			$condition = DBA::mergeConditions($condition,
+			$condition = DBA::mergeConditions(
+				$condition,
 				["(`vid` != ? OR `type` != ? OR NOT `actor-id` IN (SELECT `id` FROM `contact` WHERE NOT `pending`))",
-				Verb::getID(Activity::FOLLOW), Post\UserNotification::TYPE_NONE]);
+					Verb::getID(Activity::FOLLOW),
+					Post\UserNotification::TYPE_NONE]
+			);
 		}
 
 		if (in_array(Notification::TYPE_LIKE, $request['exclude_types'])) {
@@ -122,26 +130,31 @@ class Notifications extends BaseApi
 				Verb::getID(Activity::POST), Post\UserNotification::TYPE_SHARED]);
 		}
 
-		$mstdnNotifications = [];
+		if ($request['summary']) {
+			$count = DI::notification()->countForUser($uid, $condition);
+			$this->jsonExit(['count' => $count]);
+		} else {
+			$mstdnNotifications = [];
 
-		$Notifications = DI::notification()->selectByBoundaries(
-			$condition,
-			$params,
-			$request['min_id'] ?: $request['since_id'],
-			$request['max_id'],
-			$request['limit']
-		);
+			$Notifications = DI::notification()->selectByBoundaries(
+				$condition,
+				$params,
+				$request['min_id'] ?: $request['since_id'],
+				$request['max_id'],
+				min($request['limit'], 30)
+			);
 
-		foreach($Notifications as $Notification) {
-			try {
-				$mstdnNotifications[] = DI::mstdnNotification()->createFromNotification($Notification);
-				self::setBoundaries($Notification->id);
-			} catch (\Exception $e) {
-				// Skip this notification
+			foreach ($Notifications as $Notification) {
+				try {
+					$mstdnNotifications[] = DI::mstdnNotification()->createFromNotification($Notification, self::appSupportsQuotes());
+					self::setBoundaries($Notification->id);
+				} catch (\Exception $e) {
+					// Skip this notification
+				}
 			}
-		}
 
-		self::setLinkHeader();
-		System::jsonExit($mstdnNotifications);
+			self::setLinkHeader();
+			$this->jsonExit($mstdnNotifications);
+		}
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -49,7 +49,7 @@ $login_bg_color   = '';
 $modified         = time();
 
 if (DI::mode()->has(\Friendica\App\Mode::MAINTENANCEDISABLED)) {
-	DI::config()->load('frio');
+	DI::config()->reload();
 
 	// Default to hard-coded values for empty settings
 	$scheme           = DI::config()->get('frio', 'scheme', DI::config()->get('frio', 'schema'));
@@ -209,10 +209,12 @@ $options = [
 	'$login_bg_image'              => $login_bg_image,
 	'$login_bg_color'              => $login_bg_color,
 	'$font_color_darker'           => $font_color_darker ?? '#222',
+	'$font_color_lighter'          => $font_color_lighter ?? '#aaa',
 	'$font_color'                  => $font_color ?? '#444',
 ];
 
 $css_tpl = file_get_contents('view/theme/frio/css/style.css');
+$css_tpl .= file_get_contents('view/theme/frio/css/dropzone.min.frio.css');
 
 // Get the content of the scheme css file and the time of the last file change.
 if ($schemecssfile) {

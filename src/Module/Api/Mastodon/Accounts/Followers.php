@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -37,16 +37,16 @@ class Followers extends BaseApi
 	 */
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = self::getCurrentUserID();
 
 		if (empty($this->parameters['id'])) {
-			DI::mstdnError()->UnprocessableEntity();
+			$this->logAndJsonError(422, $this->errorFactory->UnprocessableEntity());
 		}
 
 		$id = $this->parameters['id'];
 		if (!DBA::exists('contact', ['id' => $id, 'uid' => 0])) {
-			DI::mstdnError()->RecordNotFound();
+			$this->logAndJsonError(404, $this->errorFactory->RecordNotFound());
 		}
 
 		$request = $this->getRequest([
@@ -60,23 +60,23 @@ class Followers extends BaseApi
 			$params = ['order' => ['pid' => true], 'limit' => $request['limit']];
 
 			$condition = ['uid' => $uid, 'self' => false, 'rel' => [Contact::FOLLOWER, Contact::FRIEND]];
-	
+
 			if (!empty($request['max_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`pid` < ?", $request['max_id']]);
 			}
-	
+
 			if (!empty($request['since_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`pid` > ?", $request['since_id']]);
 			}
-	
+
 			if (!empty($request['min_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`pid` > ?", $request['min_id']]);
-	
+
 				$params['order'] = ['pid'];
 			}
-	
+
 			$accounts = [];
-	
+
 			foreach (Contact::selectAccountToArray(['pid'], $condition, $params) as $follower) {
 				self::setBoundaries($follower['pid']);
 				$accounts[] = DI::mstdnAccount()->createFromContactId($follower['pid'], $uid);
@@ -85,23 +85,23 @@ class Followers extends BaseApi
 			$params = ['order' => ['relation-cid' => true], 'limit' => $request['limit']];
 
 			$condition = ['cid' => $id, 'follows' => true];
-	
+
 			if (!empty($request['max_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`relation-cid` < ?", $request['max_id']]);
 			}
-	
+
 			if (!empty($request['since_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`relation-cid` > ?", $request['since_id']]);
 			}
-	
+
 			if (!empty($request['min_id'])) {
 				$condition = DBA::mergeConditions($condition, ["`relation-cid` > ?", $request['min_id']]);
-	
+
 				$params['order'] = ['relation-cid'];
 			}
-	
+
 			$accounts = [];
-	
+
 			$followers = DBA::select('contact-relation', ['relation-cid'], $condition, $params);
 			while ($follower = DBA::fetch($followers)) {
 				self::setBoundaries($follower['relation-cid']);
@@ -115,6 +115,6 @@ class Followers extends BaseApi
 		}
 
 		self::setLinkHeader();
-		System::jsonExit($accounts);
+		$this->jsonExit($accounts);
 	}
 }

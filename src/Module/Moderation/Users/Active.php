@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -32,7 +32,7 @@ class Active extends BaseUsers
 	{
 		$this->checkModerationAccess();
 
-		self::checkFormSecurityTokenRedirectOnError($this->baseUrl->get(true), 'moderation_users_active');
+		self::checkFormSecurityTokenRedirectOnError($this->baseUrl, 'moderation_users_active');
 
 		$users = $request['user'] ?? [];
 
@@ -125,7 +125,7 @@ class Active extends BaseUsers
 
 		$th_users = array_map(null, [$this->t('Name'), $this->t('Email'), $this->t('Register date'), $this->t('Last login'), $this->t('Last public item'), $this->t('Type')], $valid_orders);
 
-		$count = $this->database->count('user', ["NOT `blocked` AND `verified` AND NOT `account_removed` AND `uid` != ?", 0]);
+		$count = $this->database->count('user', ["`verified` AND NOT `blocked` AND NOT `account_removed` AND NOT `account_expired` AND `uid` != ?", 0]);
 
 		$t = Renderer::getMarkupTemplate('moderation/users/active.tpl');
 		return self::getTabsHTML('active') . Renderer::replaceMacros($t, [
@@ -150,7 +150,7 @@ class Active extends BaseUsers
 			'$form_security_token' => self::getFormSecurityToken('moderation_users_active'),
 
 			// values //
-			'$baseurl'      => $this->baseUrl->get(true),
+			'$baseurl'      => $this->baseUrl,
 			'$query_string' => $this->args->getQueryString(),
 
 			'$users' => $users,

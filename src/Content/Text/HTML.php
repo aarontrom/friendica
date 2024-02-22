@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -23,7 +23,7 @@ namespace Friendica\Content\Text;
 
 use DOMDocument;
 use DOMXPath;
-use Friendica\Content\Widget\ContactBlock;
+use Friendica\Protocol\HTTP\MediaType;
 use Friendica\Core\Hook;
 use Friendica\Core\Renderer;
 use Friendica\Core\Search;
@@ -33,6 +33,7 @@ use Friendica\Util\Network;
 use Friendica\Util\Strings;
 use Friendica\Util\XML;
 use League\HTMLToMarkdown\HtmlConverter;
+use Psr\Http\Message\UriInterface;
 
 class HTML
 {
@@ -279,9 +280,9 @@ class HTML
 			self::tagToBBCode($doc, 'div', [], "\r", "\r");
 			self::tagToBBCode($doc, 'p', [], "\n", "\n");
 
-			self::tagToBBCode($doc, 'ul', [], "[list]", "[/list]");
-			self::tagToBBCode($doc, 'ol', [], "[list=1]", "[/list]");
-			self::tagToBBCode($doc, 'li', [], "[*]", "");
+			self::tagToBBCode($doc, 'ul', [], "[ul]", "\n[/ul]");
+			self::tagToBBCode($doc, 'ol', [], "[ol]", "\n[/ol]");
+			self::tagToBBCode($doc, 'li', [], "\n[li]", "[/li]");
 
 			self::tagToBBCode($doc, 'hr', [], "[hr]", "");
 
@@ -346,33 +347,6 @@ class HTML
 				$oldmessage = $message;
 				$message = str_replace("\n\n\n", "\n\n", $message);
 			} while ($oldmessage != $message);
-
-			do {
-				$oldmessage = $message;
-				$message = str_replace(
-					[
-						"[/size]\n\n",
-						"\n[hr]",
-						"[hr]\n",
-						"\n[list",
-						"[/list]\n",
-						"\n[/",
-						"[list]\n",
-						"[list=1]\n",
-						"\n[*]"],
-					[
-						"[/size]\n",
-						"[hr]",
-						"[hr]",
-						"[list",
-						"[/list]",
-						"[/",
-						"[list]",
-						"[list=1]",
-						"[*]"],
-					$message
-				);
-			} while ($message != $oldmessage);
 
 			$message = str_replace(
 				['[b][b]', '[/b][/b]', '[i][i]', '[/i][/i]'],
@@ -448,7 +422,8 @@ class HTML
 	{
 		$URLSearchString = "^\[\]";
 
-		$matches = ["/\[url\=([$URLSearchString]*)\].*?\[\/url\]/ism",
+		$matches = [
+			"/\[url\=([$URLSearchString]*)\].*?\[\/url\]/ism",
 			"/\[url\]([$URLSearchString]*)\[\/url\]/ism",
 			"/\[img\=[0-9]*x[0-9]*\](.*?)\[\/img\]/ism",
 			"/\[img\](.*?)\[\/img\]/ism",
@@ -557,8 +532,10 @@ class HTML
 			$ignore = false;
 
 			// A list of some links that should be ignored
-			$list = ["/user/", "/tag/", "/group/", "/profile/", "/search?search=", "/search?tag=", "mailto:", "/u/", "/node/",
-				"//plus.google.com/", "//twitter.com/"];
+			$list = [
+				"/user/", "/tag/", "/group/", "/circle/", "/profile/", "/search?search=", "/search?tag=", "mailto:", "/u/", "/node/",
+				"//plus.google.com/", "//twitter.com/"
+			];
 			foreach ($list as $listitem) {
 				if (strpos($treffer[1], $listitem) !== false) {
 					$ignore = true;
@@ -867,7 +844,7 @@ class HTML
 	 *
 	 * @param string $s     Search query.
 	 * @param string $id    HTML id
-	 * @param bool   $aside Display the search widgit aside.
+	 * @param bool   $aside Display the search widget aside.
 	 *
 	 * @return string Formatted HTML.
 	 * @throws \Exception
@@ -887,7 +864,7 @@ class HTML
 			'$id'           => $id,
 			'$search_label' => DI::l10n()->t('Search'),
 			'$save_label'   => $save_label,
-			'$search_hint'  => DI::l10n()->t('@name, !forum, #tags, content'),
+			'$search_hint'  => DI::l10n()->t('@name, !group, #tags, content'),
 			'$mode'         => $mode,
 			'$return_url'   => urlencode(Search::getSearchPath($s)),
 		];
@@ -900,7 +877,7 @@ class HTML
 			];
 
 			if (DI::config()->get('system', 'poco_local_search')) {
-				$values['$searchoption']['forums'] = DI::l10n()->t('Forums');
+				$values['$searchoption']['groups'] = DI::l10n()->t('Groups');
 			}
 		}
 
@@ -967,7 +944,8 @@ class HTML
 			$domain = '(?:(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)*' . preg_quote(trim($domain, '/'), '%');
 		});
 
-		$config->set('URI.SafeIframeRegexp',
+		$config->set(
+			'URI.SafeIframeRegexp',
 			'%^https://(?:
 				' . implode('|', $allowedIframeDomains) . '
 			)
@@ -1006,5 +984,79 @@ class HTML
 		//var_dump($errorCollector->getRaw());
 
 		return $text;
+	}
+
+	/**
+	 * XPath arbitrary string quoting
+	 *
+	 * @see https://stackoverflow.com/a/45228168
+	 * @param string $value
+	 * @return string
+	 */
+	public static function xpathQuote(string $value): string
+	{
+		if (false === strpos($value, '"')) {
+			return '"' . $value . '"';
+		}
+
+		if (false === strpos($value, "'")) {
+			return "'" . $value . "'";
+		}
+
+		// if the value contains both single and double quotes, construct an
+		// expression that concatenates all non-double-quote substrings with
+		// the quotes, e.g.:
+		//
+		//    concat("'foo'", '"', "bar")
+		return 'concat(' . implode(', \'"\', ', array_map([self::class, 'xpathQuote'], explode('"', $value))) . ')';
+	}
+
+	/**
+	 * Checks if the provided URL is present in the DOM document in an element with the rel="me" attribute
+	 *
+	 * XHTML Friends Network http://gmpg.org/xfn/
+	 *
+	 * @param DOMDocument  $doc
+	 * @param UriInterface $meUrl
+	 * @return bool
+	 */
+	public static function checkRelMeLink(DOMDocument $doc, UriInterface $meUrl): bool
+	{
+		$xpath = new \DOMXpath($doc);
+
+		// This expression checks that "me" is among the space-delimited values of the "rel" attribute.
+		// And that the href attribute contains exactly the provided URL
+		$expression = "//*[contains(concat(' ', normalize-space(@rel), ' '), ' me ')][@href = " . self::xpathQuote($meUrl) . "]";
+
+		$result = $xpath->query($expression);
+
+		return $result !== false && $result->length > 0;
+	}
+
+	/**
+	 * @param DOMDocument $doc
+	 * @return string|null Lowercase charset
+	 */
+	public static function extractCharset(DOMDocument $doc): ?string
+	{
+		$xpath = new DOMXPath($doc);
+
+		$expression = "string(//meta[@charset]/@charset)";
+		if ($charset = $xpath->evaluate($expression)) {
+			return strtolower($charset);
+		}
+
+		try {
+			// This expression looks for a meta tag with the http-equiv attribute set to "content-type" ignoring case
+			// whose content attribute contains a "charset" string and returns its value
+			$expression = "string(//meta[@http-equiv][translate(@http-equiv, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = 'content-type'][contains(translate(@content, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'charset')]/@content)";
+			$mediaType = MediaType::fromContentType($xpath->evaluate($expression));
+			if (isset($mediaType->parameters['charset'])) {
+				return strtolower($mediaType->parameters['charset']);
+			}
+		} catch (\InvalidArgumentException $e) {
+		}
+
+		return null;
 	}
 }

@@ -136,11 +136,11 @@ $(document).ready(function () {
 		.trigger("change");
 
 	// JS for the permission section.
-	$("#contact_allow, #contact_deny, #group_allow, #group_deny")
+	$("#contact_allow, #contact_deny, #circle_allow, #circle_deny")
 		.change(function () {
 			var selstr;
 			$(
-				"#contact_allow option:selected, #contact_deny option:selected, #group_allow option:selected, #group_deny option:selected",
+				"#contact_allow option:selected, #contact_deny option:selected, #circle_allow option:selected, #circle_deny option:selected",
 			).each(function () {
 				selstr = $(this).html();
 				$("#jot-public").hide();
@@ -266,9 +266,9 @@ function eventHoverHtmlContent(event) {
 	// Get only template data if there exists location data
 	if (event.location) {
 		var eventLocationText = htmlToText(event.location);
-		// Get the the html template for formatting the location
+		// Get the html template for formatting the location
 		var eventLocationTemplate = eventHoverLocationTemplate();
-		// Format the event location data according to the the event location
+		// Format the event location data according to the event location
 		// template
 		eventLocation = eventLocationTemplate.format(eventLocationText);
 	}
@@ -295,12 +295,12 @@ function eventHoverHtmlContent(event) {
 	return formatted;
 }
 
-// transform the the list view event element into formatted html
+// transform the list view event element into formatted html
 function formatListViewEvent(event) {
 	// The basic template for list view
 	var template =
 		'<td class="fc-list-item-title fc-widget-content">\
-				<hr class="seperator"></hr>\
+				<hr class="separator"></hr>\
 				<div class="event-card">\
 					<div class="popover-content hovercard-content">{0}</div>\
 				</div>\

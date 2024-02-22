@@ -3,7 +3,7 @@ How to improve the performance of a Friendica site
 
 * [Home](help)
 
-Feel free to ask in the [Friendica support forum](https://forum.friendi.ca/profile/helpers) if you need some clarification about the following instructions or if you need help in any other way.
+Feel free to ask in the [Friendica support group](https://forum.friendi.ca/profile/helpers) if you need some clarification about the following instructions or if you need help in any other way.
 
 System configuration
 --------
@@ -31,7 +31,7 @@ Active the following addons:
 
 ### rendertime
 
-This addon doesn't speed up your system. 
+This addon doesn't speed up your system.
 It helps to analyze your bottlenecks.
 
 When enabled you see some values at the bottom of every page.
@@ -81,6 +81,6 @@ Please refer to external documentation for a more detailed explanation how to se
 
 ### Database
 
-There are scripts like [tuning-primer.sh](http://www.day32.com/MySQL/) and [mysqltuner.pl](http://mysqltuner.pl) that analyze your database server and give hints on values that could be changed.
+There are scripts like [tuning-primer.sh](https://github.com/BMDan/tuning-primer.sh) and [mysqltuner.pl](https://github.com/major/MySQLTuner-perl/blob/master/mysqltuner.pl) that analyze your database server and give hints on values that could be changed.
 
 Please enable the slow query log. This helps to find performance problems.

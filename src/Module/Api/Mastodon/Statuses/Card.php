@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -40,17 +40,15 @@ class Card extends BaseApi
 		$uid = self::getCurrentUserID();
 
 		if (empty($this->parameters['id'])) {
-			DI::mstdnError()->UnprocessableEntity();
+			$this->logAndJsonError(422, $this->errorFactory->UnprocessableEntity());
 		}
 
-		$id = $this->parameters['id'];
-
-		if (!Post::exists(['uri-id' => $id, 'uid' => [0, $uid]])) {
-			throw new HTTPException\NotFoundException('Item with URI ID ' . $id . ' not found' . ($uid ? ' for user ' . $uid : '.'));
+		if (!$post = Post::selectOriginal(['uri-id'], ['uri-id' => $this->parameters['id'], 'uid' => [0, $uid]])) {
+			throw new HTTPException\NotFoundException('Item with URI ID ' . $this->parameters['id'] . ' not found' . ($uid ? ' for user ' . $uid : '.'));
 		}
 
-		$card = DI::mstdnCard()->createFromUriId($id);
+		$card = DI::mstdnCard()->createFromUriId($post['uri-id']);
 
-		System::jsonExit($card->toArray());
+		$this->jsonExit($card->toArray());
 	}
 }

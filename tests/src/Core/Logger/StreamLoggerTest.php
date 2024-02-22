@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,9 +22,7 @@
 namespace Friendica\Test\src\Core\Logger;
 
 use Friendica\Core\Logger\Exception\LoggerArgumentException;
-use Friendica\Core\Logger\Exception\LoggerException;
 use Friendica\Core\Logger\Exception\LogLevelException;
-use Friendica\Util\FileSystem;
 use Friendica\Test\Util\VFSTrait;
 use Friendica\Core\Logger\Type\StreamLogger;
 use org\bovigo\vfs\vfsStream;
@@ -40,31 +38,26 @@ class StreamLoggerTest extends AbstractLoggerTest
 	 */
 	private $logfile;
 
-	/**
-	 * @var Filesystem
-	 */
-	private $fileSystem;
-
 	protected function setUp(): void
 	{
 		parent::setUp();
 
 		$this->setUpVfsDir();
-
-		$this->fileSystem = new FileSystem();
 	}
 
 	/**
 	 * {@@inheritdoc}
 	 */
-	protected function getInstance($level = LogLevel::DEBUG)
+	protected function getInstance($level = LogLevel::DEBUG, $logfile = 'friendica.log')
 	{
-		$this->logfile = vfsStream::newFile('friendica.log')
+		$this->logfile = vfsStream::newFile($logfile)
 			->at($this->root);
 
-		$logger = new StreamLogger('test', $this->logfile->url(), $this->introspection, $this->fileSystem, $level);
+		$this->config->shouldReceive('get')->with('system', 'logfile')->andReturn($this->logfile->url())->once();
+		$this->config->shouldReceive('get')->with('system', 'loglevel')->andReturn($level)->once();
 
-		return $logger;
+		$loggerFactory = new \Friendica\Core\Logger\Factory\StreamLogger($this->introspection, 'test');
+		return $loggerFactory->create($this->config);
 	}
 
 	/**
@@ -76,51 +69,17 @@ class StreamLoggerTest extends AbstractLoggerTest
 	}
 
 	/**
-	 * Test if a stream is working
-	 */
-	public function testStream()
-	{
-		$logfile = vfsStream::newFile('friendica.log')
-			->at($this->root);
-
-		$filehandler = fopen($logfile->url(), 'ab');
-
-		$logger = new \Friendica\Core\Logger\Type\StreamLogger('test', $filehandler, $this->introspection, $this->fileSystem);
-		$logger->emergency('working');
-
-		$text = $logfile->getContent();
-
-		self::assertLogline($text);
-	}
-
-	/**
-	 * Test if the close statement is working
-	 */
-	public function testClose()
-	{
-		$logfile = vfsStream::newFile('friendica.log')
-			->at($this->root);
-
-		$logger = new StreamLogger('test', $logfile->url(), $this->introspection, $this->fileSystem);
-		$logger->emergency('working');
-		$logger->close();
-		// close doesn't affect
-		$logger->emergency('working too');
-
-		$text = $logfile->getContent();
-
-		self::assertLoglineNums(2, $text);
-	}
-
-	/**
 	 * Test when a file isn't set
 	 */
 	public function testNoUrl()
 	{
 		$this->expectException(LoggerArgumentException::class);
-		$this->expectExceptionMessage("Missing stream URL.");
+		$this->expectExceptionMessage(' is not a valid logfile');
 
-		$logger = new StreamLogger('test', '', $this->introspection, $this->fileSystem);
+		$this->config->shouldReceive('get')->with('system', 'logfile')->andReturn('')->once();
+
+		$loggerFactory = new \Friendica\Core\Logger\Factory\StreamLogger($this->introspection, 'test');
+		$logger = $loggerFactory->create($this->config);
 
 		$logger->emergency('not working');
 	}
@@ -130,13 +89,15 @@ class StreamLoggerTest extends AbstractLoggerTest
 	 */
 	public function testWrongUrl()
 	{
-		$this->expectException(LoggerException::class);
-		$this->expectExceptionMessage("Cannot create stream.");
+		$this->expectException(LoggerArgumentException::class);
 
 		$logfile = vfsStream::newFile('friendica.log')
 			->at($this->root)->chmod(0);
 
-		$logger = new StreamLogger('test', $logfile->url(), $this->introspection, $this->fileSystem);
+		$this->config->shouldReceive('get')->with('system', 'logfile')->andReturn($logfile->url())->once();
+
+		$loggerFactory = new \Friendica\Core\Logger\Factory\StreamLogger($this->introspection, 'test');
+		$logger = $loggerFactory->create($this->config);
 
 		$logger->emergency('not working');
 	}
@@ -151,7 +112,8 @@ class StreamLoggerTest extends AbstractLoggerTest
 
 		static::markTestIncomplete('We need a platform independent way to set directory to readonly');
 
-		$logger = new StreamLogger('test', '/$%/wrong/directory/file.txt', $this->introspection, $this->fileSystem);
+		$loggerFactory = new \Friendica\Core\Logger\Factory\StreamLogger($this->introspection, 'test');
+		$logger = $loggerFactory->create($this->config);
 
 		$logger->emergency('not working');
 	}
@@ -164,7 +126,7 @@ class StreamLoggerTest extends AbstractLoggerTest
 		$this->expectException(LogLevelException::class);
 		$this->expectExceptionMessageMatches("/The level \".*\" is not valid./");
 
-		$logger = new StreamLogger('test', 'file.text', $this->introspection, $this->fileSystem, 'NOPE');
+		$logger = $this->getInstance('NOPE');
 	}
 
 	/**
@@ -175,23 +137,9 @@ class StreamLoggerTest extends AbstractLoggerTest
 		$this->expectException(LogLevelException::class);
 		$this->expectExceptionMessageMatches("/The level \".*\" is not valid./");
 
-		$logfile = vfsStream::newFile('friendica.log')
-			->at($this->root);
-
-		$logger = new StreamLogger('test', $logfile->url(), $this->introspection, $this->fileSystem);
+		$logger = $this->getInstance('NOPE');
 
 		$logger->log('NOPE', 'a test');
-	}
-
-	/**
-	 * Test when the file is null
-	 */
-	public function testWrongFile()
-	{
-		$this->expectException(LoggerArgumentException::class);
-		$this->expectExceptionMessage("A stream must either be a resource or a string.");
-
-		$logger = new StreamLogger('test', null, $this->introspection, $this->fileSystem);
 	}
 
 	/**
@@ -207,7 +155,9 @@ class StreamLoggerTest extends AbstractLoggerTest
 
 		chdir($this->root->getChild('logs')->url());
 
-		$logger = new StreamLogger('test', '../friendica.log' , $this->introspection, $this->fileSystem);
+		$this->config->shouldReceive('get')->with('system', 'logfile')->andReturn('../friendica.log')->once();
+
+		$logger = new StreamLogger('test', $this->config, $this->introspection, $this->fileSystem);
 
 		$logger->info('Test');
 	}

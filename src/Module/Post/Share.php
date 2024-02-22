@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -57,23 +57,23 @@ class Share extends \Friendica\BaseModule
 	{
 		$post_id = $this->parameters['post_id'];
 		if (!$post_id || !$this->session->getLocalUserId()) {
-			System::httpError(403);
+			$this->httpError(403);
 		}
 
 		$item = Post::selectFirst(['private', 'body', 'uri', 'plink', 'network'], ['id' => $post_id]);
 		if (!$item || $item['private'] == Item::PRIVATE) {
-			System::httpError(404);
+			$this->httpError(404);
 		}
 
 		$shared = $this->contentItem->getSharedPost($item, ['uri']);
 		if ($shared && empty($shared['comment'])) {
 			$content = '[share]' . $shared['post']['uri'] . '[/share]';
-		} elseif ($item['network'] == Protocol::FEED) {
+		} elseif (!empty($item['plink']) && !in_array($item['network'], Protocol::FEDERATED)) {
 			$content = '[attachment]' . $item['plink'] . '[/attachment]';
 		} else {
 			$content = '[share]' . $item['uri'] . '[/share]';
 		}
 
-		System::httpExit($content);
+		$this->httpExit($content);
 	}
 }

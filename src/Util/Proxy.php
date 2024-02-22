@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -36,8 +36,8 @@ class Proxy
 	 */
 	const SIZE_MICRO  = 'micro'; // 48
 	const SIZE_THUMB  = 'thumb'; // 80
-	const SIZE_SMALL  = 'small'; // 300
-	const SIZE_MEDIUM = 'medium'; // 600
+	const SIZE_SMALL  = 'small'; // 320
+	const SIZE_MEDIUM = 'medium'; // 640
 	const SIZE_LARGE  = 'large'; // 1024
 
 	/**
@@ -45,8 +45,8 @@ class Proxy
 	 */
 	const PIXEL_MICRO  = 48;
 	const PIXEL_THUMB  = 80;
-	const PIXEL_SMALL  = 300;
-	const PIXEL_MEDIUM = 600;
+	const PIXEL_SMALL  = 320;
+	const PIXEL_MEDIUM = 640;
 	const PIXEL_LARGE  = 1024;
 
 	/**
@@ -75,9 +75,9 @@ class Proxy
 	 * This function only performs the URL replacement on http URL and if the
 	 * provided URL isn't local
 	 *
-	 * @param string $url       The URL to proxyfy
+	 * @param string $url       The URL to proxify
 	 * @param string $size      One of the Proxy::SIZE_* constants
-	 * @return string The proxyfied URL or relative path
+	 * @return string The proxified URL or relative path
 	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
 	 */
 	public static function proxifyUrl(string $url, string $size = ''): string
@@ -116,7 +116,7 @@ class Proxy
 			$size = ':' . $size;
 		}
 
-		Logger::info('Created proxy link', ['url' => $url, 'callstack' => System::callstack(20)]);
+		Logger::info('Created proxy link', ['url' => $url]);
 
 		// Too long files aren't supported by Apache
 		if (strlen($proxypath) > 250) {
@@ -141,7 +141,7 @@ class Proxy
 	{
 		$html = str_replace(Strings::normaliseLink(DI::baseUrl()) . '/', DI::baseUrl() . '/', $html);
 
-		return preg_replace_callback('/(<img [^>]*src *= *["\'])([^"\']+)(["\'][^>]*>)/siU', 'self::replaceUrl', $html);
+		return preg_replace_callback('/(<img [^>]*src *= *["\'])([^"\']+)(["\'][^>]*>)/siU', [self::class, 'replaceUrl'], $html);
 	}
 
 	/**
@@ -211,4 +211,21 @@ class Proxy
 		return $matches[1] . self::proxifyUrl(htmlspecialchars_decode($matches[2])) . $matches[3];
 	}
 
+	public static function getPixelsFromSize(string $size): int
+	{
+		switch ($size) {
+			case Proxy::SIZE_MICRO:
+				return Proxy::PIXEL_MICRO;
+			case Proxy::SIZE_THUMB:
+				return Proxy::PIXEL_THUMB;
+			case Proxy::SIZE_SMALL:
+				return Proxy::PIXEL_SMALL;
+			case Proxy::SIZE_MEDIUM:
+				return Proxy::PIXEL_MEDIUM;
+			case Proxy::SIZE_LARGE:
+				return Proxy::PIXEL_LARGE;
+			default:
+				return 0;
+		}
+	}
 }

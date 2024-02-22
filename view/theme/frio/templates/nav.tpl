@@ -5,13 +5,13 @@
 
 		<div id="site-location">{{$sitelocation}}</div>
 		<div id="banner" class="hidden-sm hidden-xs">
-			{{* show on remote/visitor connections an other logo which symbols that fact*}}
+			{{* show on remote/visitor connections another logo which symbols that fact*}}
 			{{if $nav.remote}}
 				<a href="{{$baseurl}}">
 					<div id="remote-logo-img" aria-label="{{$home}}"></div>
 				</a>
 			{{else}}
-				{{* #logo-img is the the placeholder to insert a mask (friendica logo) into this div
+				{{* #logo-img is the placeholder to insert a mask (friendica logo) into this div
 				For Firefox we have to call the paths of the mask (look at the bottom of this file).
 				Because for FF we need relative paths we apply them with js after the page is loaded (look at theme.js *}}
 				<a href="{{$baseurl}}">
@@ -41,7 +41,7 @@
 					<button type="button" class="navbar-toggle collapsed pull-left visible-sm visible-xs"
 						data-toggle="offcanvas" data-target="aside" aria-haspopup="true">
 						<span class="sr-only">Toggle navigation</span>
-						<i class="fa fa-ellipsis-v fa-fw fa-lg" aria-hidden="true"></i>
+						<i class="fa fa-angle-double-right fa-fw fa-lg" aria-hidden="true"></i>
 					</button>
 
 					{{* Left section of the NavBar with navigation shortcuts/icons *}}
@@ -54,6 +54,15 @@
 										class="nav-network-badge badge nav-notification"></span></a>
 							</li>
 						{{/if}}
+
+						{{if $nav.channel}}
+							<li class="nav-segment">
+								<a accesskey="l" class="nav-menu {{$sel.channel}}" href="{{$nav.channel.0}}"
+									data-toggle="tooltip" aria-label="{{$nav.channel.3}}" title="{{$nav.channel.3}}"><i
+										class="fa fa-lg fa-newspaper-o fa-fw" aria-hidden="true"></i></a>
+							</li>
+						{{/if}}
+
 						{{if $nav.home}}
 							<li class="nav-segment">
 								<a accesskey="p" class="nav-menu {{$sel.home}}" href="{{$nav.home.0}}" data-toggle="tooltip"
@@ -160,7 +169,7 @@
 									aria-controls="nav-user-menu">
 									<div aria-hidden="true" class="user-title pull-left hidden-xs hidden-sm hidden-md">
 										<strong>{{$userinfo.name}}</strong><br>
-										{{if $nav.remote}}<span class="trunctate">{{$nav.remote}}</span>{{/if}}
+										{{if $nav.remote}}<span class="truncate">{{$nav.remote}}</span>{{/if}}
 									</div>
 
 									<img id="avatar" src="{{$userinfo.icon}}" alt="{{$userinfo.name}}">
@@ -274,8 +283,14 @@
 											</a>
 										</li>
 									{{/if}}
+									<li role="presentation" class="divider"></li>
+									<li role="presentation">
+										<a role="menuitem" id="nav-about-link" class="nav-link {{$nav.about.2}}"
+											href="{{$nav.about.0}}" title="{{$nav.about.3}}">
+											<i class="fa fa-info fa-fw" aria-hidden="true"></i> {{$nav.about.1}}
+										</a>
+									</li>
 									{{if $nav.tos}}
-										<li role="presentation" class="divider"></li>
 										<li role="presentation">
 											<a role="menuitem" id="nav-tos-link" class="nav-link {{$nav.tos.2}}"
 												href="{{$nav.tos.0}}" title="{{$nav.tos.3}}"><i class="fa fa-file-text"
@@ -401,6 +416,14 @@
 									</a>
 								</li>
 							{{/if}}
+							<li role="presentation" class="divider"></li>
+							<li role="presentation" class="list-group-item">
+								<a role="menuitem" class="nav-link {{$nav.about.2}}"
+								   href="{{$nav.about.0}}" title="{{$nav.about.3}}">
+									<i class="fa fa-info fa-fw" aria-hidden="true"></i> {{$nav.about.1}}
+								</a>
+							</li>
+							<li role="presentation" class="divider"></li>
 							{{if $nav.logout}}
 								<li role="presentation" class="list-group-item">
 									<a role="menuitem"
@@ -475,7 +498,7 @@
 	</div>
 </div>
 
-{{* The second navbar which contains nav points of the actual page - (nav points are actual handled by this theme throug js *}}
+{{* The second navbar which contains nav points of the actual page - (nav points are actual handled by this theme through js *}}
 <div id="topbar-second" class="topbar">
 	<div class="container">
 		<div class="col-lg-3 col-md-3 hidden-sm hidden-xs" id="nav-short-info"></div>

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -27,6 +27,7 @@ use Friendica\Capabilities\ICanCreateResponses;
 use Friendica\Core\Hook;
 use Friendica\Core\L10n;
 use Friendica\Core\Logger;
+use Friendica\Core\System;
 use Friendica\Model\User;
 use Friendica\Module\Response;
 use Friendica\Module\Special\HTTPException as ModuleHTTPException;
@@ -90,9 +91,9 @@ abstract class BaseModule implements ICanHandleRequests
 	 *
 	 * @see L10n::tt()
 	 */
-	protected function tt(string $singular, string $plurarl, int $count): string
+	protected function tt(string $singular, string $plural, int $count): string
 	{
-		return $this->l10n->tt($singular, $plurarl, $count);
+		return $this->l10n->tt($singular, $plural, $count);
 	}
 
 	/**
@@ -106,8 +107,7 @@ abstract class BaseModule implements ICanHandleRequests
 	 */
 	protected function rawContent(array $request = [])
 	{
-		// echo '';
-		// exit;
+		// $this->httpExit(...);
 	}
 
 	/**
@@ -181,10 +181,15 @@ abstract class BaseModule implements ICanHandleRequests
 	/**
 	 * {@inheritDoc}
 	 */
-	public function run(array $request = []): ResponseInterface
+	public function run(ModuleHTTPException $httpException, array $request = []): ResponseInterface
 	{
 		// @see https://github.com/tootsuite/mastodon/blob/c3aef491d66aec743a3a53e934a494f653745b61/config/initializers/cors.rb
 		if (substr($this->args->getQueryString(), 0, 12) == '.well-known/') {
+			$this->response->setHeader('*', 'Access-Control-Allow-Origin');
+			$this->response->setHeader('*', 'Access-Control-Allow-Headers');
+			$this->response->setHeader(Router::GET, 'Access-Control-Allow-Methods');
+			$this->response->setHeader('false', 'Access-Control-Allow-Credentials');
+		} elseif (substr($this->args->getQueryString(), 0, 9) == 'nodeinfo/') {
 			$this->response->setHeader('*', 'Access-Control-Allow-Origin');
 			$this->response->setHeader('*', 'Access-Control-Allow-Headers');
 			$this->response->setHeader(Router::GET, 'Access-Control-Allow-Methods');
@@ -234,7 +239,8 @@ abstract class BaseModule implements ICanHandleRequests
 
 		$timestamp = microtime(true);
 		// "rawContent" is especially meant for technical endpoints.
-		// This endpoint doesn't need any theme initialization or other comparable stuff.
+		// This endpoint doesn't need any theme initialization or
+		// templating and is expected to exit on its own if it is set.
 		$this->rawContent($request);
 
 		try {
@@ -243,7 +249,16 @@ abstract class BaseModule implements ICanHandleRequests
 			$this->response->addContent($arr['content']);
 			$this->response->addContent($this->content($request));
 		} catch (HTTPException $e) {
-			$this->response->addContent((new ModuleHTTPException())->content($e));
+			// In case of System::externalRedirects(), we don't want to prettyprint the exception
+			// just redirect to the new location
+			if (($e instanceof HTTPException\FoundException) ||
+				($e instanceof HTTPException\MovedPermanentlyException) ||
+				($e instanceof HTTPException\TemporaryRedirectException)) {
+				throw $e;
+			}
+
+			$this->response->setStatus($e->getCode(), $e->getMessage());
+			$this->response->addContent($httpException->content($e));
 		} finally {
 			$this->profiler->set(microtime(true) - $timestamp, 'content');
 		}
@@ -446,5 +461,77 @@ abstract class BaseModule implements ICanHandleRequests
 		}
 
 		return $tabs;
+	}
+
+	/**
+	 * This function adds the content and a content-type HTTP header to the output.
+	 * After finishing the process is getting killed.
+	 *
+	 * @param string      $content
+	 * @param string      $type
+	 * @param string|null $content_type
+	 * @return void
+	 * @throws HTTPException\InternalServerErrorException
+	 */
+	public function httpExit(string $content, string $type = Response::TYPE_HTML, ?string $content_type = null)
+	{
+		$this->response->setType($type, $content_type);
+		$this->response->addContent($content);
+		System::echoResponse($this->response->generate());
+
+		System::exit();
+	}
+
+	/**
+	 * Send HTTP status header and exit.
+	 *
+	 * @param integer $httpCode HTTP status result value
+	 * @param string  $message  Error message. Optional.
+	 * @param mixed  $content   Response body. Optional.
+	 * @throws \Exception
+	 */
+	public function httpError(int $httpCode, string $message = '', $content = '')
+	{
+		if ($httpCode >= 400) {
+			$this->logger->debug('Exit with error', ['code' => $httpCode, 'message' => $message, 'method' => $this->args->getMethod(), 'agent' => $this->server['HTTP_USER_AGENT'] ?? '']);
+		}
+
+		$this->response->setStatus($httpCode, $message);
+
+		$this->httpExit($content);
+	}
+
+	/**
+	 * Display the response using JSON to encode the content
+	 *
+	 * @param mixed  $content
+	 * @param string $content_type
+	 * @param int    $options A combination of json_encode() binary flags
+	 * @return void
+	 * @throws HTTPException\InternalServerErrorException
+	 * @see json_encode()
+	 */
+	public function jsonExit($content, string $content_type = 'application/json', int $options = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+	{
+		$this->httpExit(json_encode($content, $options), ICanCreateResponses::TYPE_JSON, $content_type);
+	}
+
+	/**
+	 * Display a non-200 HTTP code response using JSON to encode the content and exit
+	 *
+	 * @param int    $httpCode
+	 * @param mixed  $content
+	 * @param string $content_type
+	 * @return void
+	 * @throws HTTPException\InternalServerErrorException
+	 */
+	public function jsonError(int $httpCode, $content, string $content_type = 'application/json')
+	{
+		if ($httpCode >= 400) {
+			$this->logger->debug('Exit with error', ['code' => $httpCode, 'content_type' => $content_type, 'method' => $this->args->getMethod(), 'agent' => $this->server['HTTP_USER_AGENT'] ?? '']);
+		}
+
+		$this->response->setStatus($httpCode);
+		$this->jsonExit($content, $content_type);
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -31,7 +31,7 @@ use Friendica\Network\HTTPException\UnauthorizedException;
 use Friendica\Util\DateTimeFormat;
 
 /**
- * Authentification via the basic auth method
+ * Authentication via the basic auth method
  */
 class BasicAuth
 {
@@ -177,7 +177,7 @@ class BasicAuth
 			}
 			Logger::debug('Access denied', ['parameters' => $_SERVER]);
 			// Checking for commandline for the tests, we have to avoid to send a header
-			if (php_sapi_name() !== 'cli') {
+			if (DI::config()->get('system', 'basicauth') && (php_sapi_name() !== 'cli')) {
 				header('WWW-Authenticate: Basic realm="Friendica"');
 			}
 			throw new UnauthorizedException("This API requires login");

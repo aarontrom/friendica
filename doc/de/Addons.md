@@ -38,16 +38,13 @@ $function ist ein String und der Name der Funktion, die ausgeführt wird, wenn d
 Argumente
 ---
 
-Deine Hook-Callback-Funktion wird mit mindestens einem und bis zu zwei Argumenten aufgerufen
+Deine Hook-Callback-Funktion wird mit höchstens einem Argumenten aufgerufen
 
-    function myhook_function(App $a, &$b) {
+    function myhook_function(&$b) {
 
     }
 
 Wenn du Änderungen an den aufgerufenen Daten vornehmen willst, musst du diese als Referenzvariable (mit "&") während der Funktionsdeklaration deklarieren.
-
-$a ist die Friendica "App"-Klasse, die eine Menge an Informationen über den aktuellen Friendica-Status beinhaltet, u.a. welche Module genutzt werden, Konfigurationsinformationen, Inhalte der Seite zum Zeitpunkt des Hook-Aufrufs.
-Es ist empfohlen, diese Funktion "$a" zu nennen, um seine Nutzung an den Gebrauch an anderer Stelle anzugleichen.
 
 $b kann frei benannt werden.
 Diese Information ist speziell auf den Hook bezogen, der aktuell bearbeitet wird, und beinhaltet normalerweise Daten, die du sofort nutzen, anzeigen oder bearbeiten kannst.
@@ -70,9 +67,9 @@ DI::args()->get(1); // = 'arg1'
 DI::args()->get(2); // = 'arg2'
 ```
 
-Deine Modulfunktionen umfassen oft die Funktion addon_name_content(App $a), welche den Seiteninhalt definiert und zurückgibt.
-Sie können auch addon_name_post(App $a) umfassen, welches vor der content-Funktion aufgerufen wird und normalerweise die Resultate der POST-Formulare handhabt.
-Du kannst ebenso addon_name_init(App $a) nutzen, was oft frühzeitig aufgerufen wird und das Modul initialisert.
+Deine Modulfunktionen umfassen oft die Funktion `addon_name_content()`, welche den Seiteninhalt definiert und zurückgibt.
+Sie können auch `addon_name_post()` umfassen, welches vor der content-Funktion aufgerufen wird und normalerweise die Resultate der POST-Formulare handhabt.
+Du kannst ebenso `addon_name_init()` nutzen, was oft frühzeitig aufgerufen wird und das Modul initialisert.
 
 
 Derzeitige Hooks
@@ -86,7 +83,7 @@ Derzeitige Hooks
         'user_record' => die erfolgreiche Authentifizierung muss auch einen gültigen Nutzereintrag aus der Datenbank zurückgeben
 
 **'logged_in'** - wird aufgerufen, sobald ein Nutzer sich erfolgreich angemeldet hat.
-    $b beinhaltet den $a->Nutzer-Array
+    $b beinhaltet den `App->user`
 
 
 **'display_item'** - wird aufgerufen, wenn ein Beitrag für die Anzeige formatiert wird.
@@ -106,6 +103,15 @@ Derzeitige Hooks
     $b ist das Item-Array einer Information, die in der Datenbank und im Item gespeichert ist.
         {Bitte beachte: der Seiteninhalt ist bbcode - nicht HTML)
 
+**'detect_languages'**
+Wird nach der Sprachenerkennung aufgerufen.
+Dieser Hook kann dafür verwendet werden, alternative Erkennungsfunktionen einzubinden.
+`$data` ist ein Array:
+        'text' => Der analysierte Text.
+        'detected' => (Eingabe/Ausgabe) Das Array mit den erkannten Sprachen. Der Sprachcode ist der Array-Schlüssel, der Array-Wert ist der dezimale Wert für die Wahrscheinlichkeit.
+        'uri-id' => Die Uri-Id des Beitrags
+        'author-id' => Die Contact-id des Autors.
+
 **'addon_settings'** - wird aufgerufen, wenn die HTML-Ausgabe der Addon-Einstellungsseite generiert wird.
     $b ist die HTML-Ausgabe (String) der Addon-Einstellungsseite vor dem finalen "</form>"-Tag.
 
@@ -122,7 +128,7 @@ Derzeitige Hooks
 
 **'profile_advanced'** - wird aufgerufen, wenn die HTML-Ausgabe für das "Advanced profile" generiert wird; stimmt mit dem "Profil"-Tab auf der Profilseite der Nutzer überein.
     $b ist die HTML-Ausgabe (String) des erstellten Profils
-    (Die Details des Profil-Arrays sind in $a->profile)
+    (Die Details des Profil-Arrays sind in `App->profile`)
 
 **'directory_item'** - wird von der Verzeichnisseite aufgerufen, wenn ein Item für die Anzeige formatiert wird.
     $b ist ein Array
@@ -319,6 +325,7 @@ Eine komplette Liste aller Hook-Callbacks mit den zugehörigen Dateien (am 01-Ap
 
 ### src/Model/Item.php
 
+    Hook::callAll('detect_languages', $item);
     Hook::callAll('post_local', $item);
     Hook::callAll('post_remote', $item);
     Hook::callAll('post_local_end', $posted_item);
@@ -400,6 +407,7 @@ Eine komplette Liste aller Hook-Callbacks mit den zugehörigen Dateien (am 01-Ap
     Hook::callAll('revoke_follow', $hook_data);
     Hook::callAll('block', $hook_data);
     Hook::callAll('unblock', $hook_data);
+    Hook::callAll('support_probe', $hook_data);
 
 ### src/Core/Logger/Factory.php
 

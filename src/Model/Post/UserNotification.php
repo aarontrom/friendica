@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -27,7 +27,6 @@ use Friendica\Core\Hook;
 use Friendica\Core\Logger;
 use Friendica\Database\Database;
 use Friendica\Database\DBA;
-use Friendica\Database\DBStructure;
 use Friendica\DI;
 use Friendica\Model\Contact;
 use Friendica\Model\Item;
@@ -52,6 +51,7 @@ class UserNotification
 	const TYPE_DIRECT_THREAD_COMMENT  = 64;
 	const TYPE_SHARED                 = 128;
 	const TYPE_FOLLOW                 = 256;
+	const TYPE_QUOTED                 = 512;
 
 	/**
 	 * Insert a new user notification entry
@@ -133,9 +133,15 @@ class UserNotification
 	public static function setNotification(int $uri_id, int $uid)
 	{
 		$fields = ['id', 'uri-id', 'parent-uri-id', 'uid', 'body', 'parent', 'gravity', 'vid', 'gravity',
-		           'private', 'contact-id', 'thr-parent', 'thr-parent-id', 'parent-uri-id', 'parent-uri', 'author-id', 'verb'];
+			'contact-id', 'author-id', 'author-gsid', 'owner-id', 'owner-gsid', 'causer-id', 'causer-gsid',
+			'private', 'thr-parent', 'thr-parent-id', 'parent-uri-id', 'parent-uri', 'verb'];
 		$item   = Post::selectFirst($fields, ['uri-id' => $uri_id, 'uid' => $uid, 'origin' => false]);
 		if (!DBA::isResult($item)) {
+			return;
+		}
+
+		$parent = Post::selectFirstPost(['author-id', 'author-gsid', 'owner-id', 'owner-gsid', 'causer-id', 'causer-gsid',], ['uri-id' => $item['parent-uri-id']]);
+		if (!DBA::isResult($parent)) {
 			return;
 		}
 
@@ -161,21 +167,39 @@ class UserNotification
 		DBA::close($users);
 
 		foreach (array_unique($uids) as $uid) {
-			self::setNotificationForUser($item, $uid);
+			self::setNotificationForUser($item, $parent, $uid);
 		}
 	}
 
 	/**
 	 * Checks an item for notifications for the given user and sets the "notification-type" field
 	 *
-	 * @param array $item Item array
-	 * @param int   $uid  User ID
+	 * @param array $item   Item array
+	 * @param array $parent Parent item array
+	 * @param int   $uid    User ID
 	 * @throws HTTPException\InternalServerErrorException
 	 */
-	private static function setNotificationForUser(array $item, int $uid)
+	private static function setNotificationForUser(array $item, array $parent, int $uid)
 	{
 		if (Post\ThreadUser::getIgnored($item['parent-uri-id'], $uid)) {
 			return;
+		}
+
+		foreach (array_unique([$parent['author-id'], $parent['owner-id'], $parent['causer-id'], $item['author-id'], $item['owner-id'], $item['causer-id']]) as $author_id) {
+			if (empty($author_id)) {
+				continue;
+			}
+			if (Contact\User::isBlocked($author_id, $uid) || Contact\User::isIgnored($author_id, $uid) || Contact\User::isCollapsed($author_id, $uid)) {
+				Logger::debug('Author is blocked/ignored/collapsed by user', ['uid' => $uid, 'author' => $author_id, 'uri-id' => $item['uri-id']]);
+				return;
+			}
+		}
+
+		foreach (array_unique([$parent['author-gsid'], $parent['owner-gsid'], $parent['causer-gsid'], $item['author-gsid'], $item['owner-gsid'], $item['causer-gsid']]) as $gsid) {
+			if ($gsid && DI::userGServer()->isIgnoredByUser($uid, $gsid)) {
+				Logger::debug('Server is ignored by user', ['uid' => $uid, 'gsid' => $gsid, 'uri-id' => $item['uri-id']]);
+				return;
+			}
 		}
 
 		$user = User::getById($uid, ['account-type', 'account_removed', 'account_expired']);
@@ -269,6 +293,14 @@ class UserNotification
 			$notification_type = $notification_type | self::TYPE_COMMENT_PARTICIPATION;
 			if (!$notified) {
 				self::insertNotificationByItem(self::TYPE_COMMENT_PARTICIPATION, $uid, $item);
+				$notified = true;
+			}
+		}
+
+		if (($item['verb'] != Activity::ANNOUNCE) && self::checkQuoted($item, $contacts)) {
+			$notification_type = $notification_type | self::TYPE_QUOTED;
+			if (!$notified) {
+				self::insertNotificationByItem(self::TYPE_QUOTED, $uid, $item);
 				$notified = true;
 			}
 		}
@@ -373,45 +405,23 @@ class UserNotification
 	 */
 	private static function getProfileForUser(int $uid): array
 	{
-		$notification_data = ['uid' => $uid, 'profiles' => []];
-		Hook::callAll('check_item_notification', $notification_data);
-
-		$profiles = $notification_data['profiles'];
-
-		$user = DBA::selectFirst('user', ['nickname'], ['uid' => $uid]);
-		if (!DBA::isResult($user)) {
-			return [];
-		}
-
-		$owner = DBA::selectFirst('contact', ['url', 'alias'], ['self' => true, 'uid' => $uid]);
+		$owner = User::getOwnerDataById($uid);
 		if (!DBA::isResult($owner)) {
 			return [];
 		}
 
-		// This is our regular URL format
-		$profiles[] = $owner['url'];
+		$profiles = [$owner['nurl']];
 
-		// Now the alias
-		$profiles[] = $owner['alias'];
+		$notification_data = ['uid' => $uid, 'profiles' => []];
+		Hook::callAll('check_item_notification', $notification_data);
 
-		// Notifications from Diaspora often have a URL in the Diaspora format
-		$profiles[] = DI::baseUrl() . '/u/' . $user['nickname'];
-
-		// Validate and add profile links
-		foreach ($profiles as $key => $profile) {
-			// Check for invalid profile urls (without scheme, host or path) and remove them
+		// Normalize the connector profiles
+		foreach ($notification_data['profiles'] as $profile) {
 			if (empty(parse_url($profile, PHP_URL_SCHEME)) || empty(parse_url($profile, PHP_URL_HOST)) || empty(parse_url($profile, PHP_URL_PATH))) {
-				unset($profiles[$key]);
-				continue;
+				$profiles[] = $profile;
+			} else {
+				$profiles[] = Strings::normaliseLink($profile);
 			}
-
-			// Add the normalized form
-			$profile    = Strings::normaliseLink($profile);
-			$profiles[] = $profile;
-
-			// Add the SSL form
-			$profile    = str_replace('http://', 'https://', $profile);
-			$profiles[] = $profile;
 		}
 
 		return array_unique($profiles);
@@ -581,4 +591,23 @@ class UserNotification
 		$condition = ['parent' => $item['parent'], 'author-id' => $contacts, 'deleted' => false, 'gravity' => Item::GRAVITY_ACTIVITY];
 		return Post::exists($condition);
 	}
+
+	/**
+	 * Check for a quoted post of a post of the given user
+	 *
+	 * @param array $item
+	 * @param array $contacts Array of contact IDs
+	 * @return bool The item is a quoted post of a user's post or comment
+	 * @throws Exception
+	 */
+	private static function checkQuoted(array $item, array $contacts): bool
+	{
+		if (empty($item['quote-uri-id']) || ($item['quote-uri-id'] == $item['uri-id'])) {
+			return false;
+		}
+		$condition = ['uri-id' => $item['quote-uri-id'], 'uid' => $item['uid'], 'author-id' => $contacts, 'deleted' => false, 'gravity' => [Item::GRAVITY_PARENT, Item::GRAVITY_COMMENT]];
+		return Post::exists($condition);
+	}
+
+
 }

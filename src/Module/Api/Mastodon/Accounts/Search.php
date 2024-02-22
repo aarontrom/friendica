@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -38,7 +38,7 @@ class Search extends BaseApi
 	 */
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = self::getCurrentUserID();
 
 		$request = $this->getRequest([
@@ -60,13 +60,13 @@ class Search extends BaseApi
 		}
 
 		if (empty($accounts)) {
-			$contacts = Contact::searchByName($request['q'], '', $request['following'] ? $uid : 0, $request['limit'], $request['offset']);
+			$contacts = Contact::searchByName($request['q'], '', false, $request['following'] ? $uid : 0, $request['limit'], $request['offset']);
 			foreach ($contacts as $contact) {
 				$accounts[] = DI::mstdnAccount()->createFromContactId($contact['id'], $uid);
 			}
 			DBA::close($contacts);
 		}
 
-		System::jsonExit($accounts);
+		$this->jsonExit($accounts);
 	}
 }

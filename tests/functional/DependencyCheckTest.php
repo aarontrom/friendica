@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,7 +21,6 @@
 
 namespace Friendica\Test\functional;
 
-use Dice\Dice;
 use Friendica\App;
 use Friendica\Core\Cache\Capability\ICanCache;
 use Friendica\Core\Cache\Capability\ICanCacheInMemory;
@@ -29,30 +28,20 @@ use Friendica\Core\Config\ValueObject\Cache;
 use Friendica\Core\Config\Capability\IManageConfigValues;
 use Friendica\Core\Lock\Capability\ICanLock;
 use Friendica\Database\Database;
-use Friendica\Test\Util\VFSTrait;
+use Friendica\Test\FixtureTest;
 use Friendica\Util\BasePath;
-use Friendica\Core\Config\Util\ConfigFileLoader;
-use Friendica\Util\Profiler;
-use PHPUnit\Framework\TestCase;
+use Friendica\Core\Config\Util\ConfigFileManager;
 use Psr\Log\LoggerInterface;
 
-class DependencyCheckTest extends TestCase
+class DependencyCheckTest extends FixtureTest
 {
-	use VFSTrait;
-
-	/**
-	 * @var Dice
-	 */
-	private $dice;
-
 	protected function setUp() : void
 	{
 		parent::setUp();
 
-		$this->setUpVfsDir();
-
-		$this->dice = (new Dice())
-			->addRules(include __DIR__ . '/../../static/dependencies.config.php');
+		/** @var IManageConfigValues $config */
+		$config = $this->dice->create(IManageConfigValues::class);
+		$config->set('system', 'logfile', $this->root->url() . '/logs/friendica.log');
 	}
 
 	/**
@@ -65,6 +54,9 @@ class DependencyCheckTest extends TestCase
 
 		self::assertInstanceOf(BasePath::class, $basePath);
 		self::assertEquals($this->root->url(), $basePath->getPath());
+
+		/** @var Database $dba */
+		$dba = $this->dice->create(Database::class);
 	}
 
 	/**
@@ -73,54 +65,21 @@ class DependencyCheckTest extends TestCase
 	 */
 	public function testConfigFileLoader()
 	{
-		/** @var ConfigFileLoader $configFileLoader */
-		$configFileLoader = $this->dice->create(ConfigFileLoader::class);
+		/** @var ConfigFileManager $configFileManager */
+		$configFileManager = $this->dice->create(ConfigFileManager::class);
 
-		self::assertInstanceOf(ConfigFileLoader::class, $configFileLoader);
+		self::assertInstanceOf(ConfigFileManager::class, $configFileManager);
 
 		$configCache = new Cache();
-		$configFileLoader->setupCache($configCache);
+		$configFileManager->setupCache($configCache);
 
 		self::assertNotEmpty($configCache->getAll());
 		self::assertArrayHasKey('database', $configCache->getAll());
 		self::assertArrayHasKey('system', $configCache->getAll());
 	}
 
-	/**
-	 * Test the construction of a profiler class with DI
-	 */
-	public function testProfiler()
-	{
-		/** @var Profiler $profiler */
-		$profiler = $this->dice->create(Profiler::class);
-
-		self::assertInstanceOf(Profiler::class, $profiler);
-
-		$configCache = new Cache([
-			'system' => [
-				'profiler' => true,
-			],
-			'rendertime' => [
-				'callstack' => true,
-			]
-		]);
-
-		// create new DI-library because of shared instance rule (so the Profiler wouldn't get created twice)
-		$this->dice = new Dice();
-		$profiler = $this->dice->create(Profiler::class, [$configCache]);
-
-		self::assertInstanceOf(Profiler::class, $profiler);
-		self::assertTrue($profiler->isRendertime());
-	}
-
 	public function testDatabase()
 	{
-		// PDO needs to be disabled for PHP 7.2, see https://jira.mariadb.org/browse/MDEV-24121
-		if (version_compare(PHP_VERSION, '7.3') < 0) {
-			$configCache = $this->dice->create(Cache::class);
-			$configCache->set('database', 'disable_pdo', true);
-		}
-
 		/** @var Database $database */
 		$database = $this->dice->create(Database::class);
 
@@ -150,7 +109,6 @@ class DependencyCheckTest extends TestCase
 
 		self::assertTrue($mode->has(App\Mode::LOCALCONFIGPRESENT), 'No local config present');
 		self::assertTrue($mode->has(App\Mode::DBAVAILABLE), 'Database is not available');
-		self::assertTrue($mode->has(App\Mode::DBCONFIGAVAILABLE), 'Database config is not available');
 		self::assertTrue($mode->has(App\Mode::MAINTENANCEDISABLED), 'In maintenance mode');
 
 		self::assertTrue($mode->isNormal(), 'Not in normal mode');
@@ -169,7 +127,7 @@ class DependencyCheckTest extends TestCase
 	public function testLogger()
 	{
 		/** @var LoggerInterface $logger */
-		$logger = $this->dice->create(LoggerInterface::class, ['test']);
+		$logger = $this->dice->create(LoggerInterface::class, [['$channel' => 'test']]);
 
 		self::assertInstanceOf(LoggerInterface::class, $logger);
 	}
@@ -190,6 +148,7 @@ class DependencyCheckTest extends TestCase
 	{
 		/** @var ICanCache $cache */
 		$cache = $this->dice->create(ICanCache::class);
+
 
 		self::assertInstanceOf(ICanCache::class, $cache);
 	}

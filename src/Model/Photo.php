@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -36,11 +36,12 @@ use Friendica\Object\Image;
 use Friendica\Util\DateTimeFormat;
 use Friendica\Util\Images;
 use Friendica\Security\Security;
+use Friendica\Util\Network;
 use Friendica\Util\Proxy;
 use Friendica\Util\Strings;
 
 /**
- * Class to handle photo dabatase table
+ * Class to handle photo database table
  */
 class Photo
 {
@@ -100,7 +101,7 @@ class Photo
 	 * Get photos for user id
 	 *
 	 * @param integer $uid        User id
-	 * @param string  $resourceid Rescource ID of the photo
+	 * @param string  $resourceid Resource ID of the photo
 	 * @param array   $conditions Array of fields for conditions
 	 * @param array   $params     Array of several parameters
 	 *
@@ -121,7 +122,7 @@ class Photo
 	 * Get a photo for user id
 	 *
 	 * @param integer $uid        User id
-	 * @param string  $resourceid Rescource ID of the photo
+	 * @param string  $resourceid Resource ID of the photo
 	 * @param integer $scale      Scale of the photo. Defaults to 0
 	 * @param array   $conditions Array of fields for conditions
 	 * @param array   $params     Array of several parameters
@@ -147,13 +148,14 @@ class Photo
 	 * on success, "no sign" image info, if user has no permission,
 	 * false if photo does not exists
 	 *
-	 * @param string  $resourceid Rescource ID of the photo
-	 * @param integer $scale      Scale of the photo. Defaults to 0
+	 * @param string  $resourceid  Resource ID of the photo
+	 * @param integer $scale       Scale of the photo. Defaults to 0
+	 * @param integer $visitor_uid UID of the visitor
 	 *
 	 * @return boolean|array
 	 * @throws \Exception
 	 */
-	public static function getPhoto(string $resourceid, int $scale = 0)
+	public static function getPhoto(string $resourceid, int $scale = 0, int $visitor_uid = 0)
 	{
 		$r = self::selectFirst(['uid'], ['resource-id' => $resourceid]);
 		if (!DBA::isResult($r)) {
@@ -164,7 +166,11 @@ class Photo
 
 		$accessible = $uid ? (bool)DI::pConfig()->get($uid, 'system', 'accessible-photos', false) : false;
 
-		$sql_acl = Security::getPermissionsSQLByUserId($uid, $accessible);
+		if (!empty($visitor_uid) && ($uid == $visitor_uid)) {
+			$sql_acl = '';
+		} else {
+			$sql_acl = Security::getPermissionsSQLByUserId($uid, $accessible);
+		}
 
 		$conditions = ["`resource-id` = ? AND `scale` <= ? " . $sql_acl, $resourceid, $scale];
 		$params = ['order' => ['scale' => true]];
@@ -225,7 +231,7 @@ class Photo
 			DBA::p(
 				"SELECT `resource-id`, ANY_VALUE(`id`) AS `id`, ANY_VALUE(`filename`) AS `filename`, ANY_VALUE(`type`) AS `type`,
 					min(`scale`) AS `hiq`, max(`scale`) AS `loq`, ANY_VALUE(`desc`) AS `desc`, ANY_VALUE(`created`) AS `created`
-					FROM `photo` WHERE `uid` = ? AND NOT `photo-type` IN (?, ?) $sqlExtra 
+					FROM `photo` WHERE `uid` = ? AND NOT `photo-type` IN (?, ?) $sqlExtra
 					GROUP BY `resource-id` $sqlExtra2",
 				$values
 			));
@@ -408,9 +414,9 @@ class Photo
 	 * @param integer $scale     Scale
 	 * @param integer $type      Photo type, optional, default: Photo::DEFAULT
 	 * @param string  $allow_cid Permissions, allowed contacts. optional, default = ""
-	 * @param string  $allow_gid Permissions, allowed groups. optional, default = ""
-	 * @param string  $deny_cid  Permissions, denied contacts.optional, default = ""
-	 * @param string  $deny_gid  Permissions, denied greoup.optional, default = ""
+	 * @param string  $allow_gid Permissions, allowed circles. optional, default = ""
+	 * @param string  $deny_cid  Permissions, denied contacts. optional, default = ""
+	 * @param string  $deny_gid  Permissions, denied circle. optional, default = ""
 	 * @param string  $desc      Photo caption. optional, default = ""
 	 *
 	 * @return boolean True on success
@@ -530,7 +536,7 @@ class Photo
 	 * @param Image $image      Image to update. Optional, default null.
 	 * @param array $old_fields Array with the old field values that are about to be replaced (true = update on duplicate)
 	 *
-	 * @return boolean  Was the update successfull?
+	 * @return boolean  Was the update successful?
 	 *
 	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
 	 * @see   \Friendica\Database\DBA::update
@@ -581,6 +587,11 @@ class Photo
 		}
 
 		$photo_failure = false;
+
+		if (!Network::isValidHttpUrl($image_url)) {
+			Logger::warning('Invalid image url', ['image_url' => $image_url, 'uid' => $uid, 'cid' => $cid]);
+			return false;
+		}
 
 		$filename = basename($image_url);
 		if (!empty($image_url)) {
@@ -819,13 +830,13 @@ class Photo
 	 * Changes photo permissions that had been embedded in a post
 	 *
 	 * @todo This function currently does have some flaws:
-	 * - Sharing a post with a forum will create a photo that only the forum can see.
+	 * - Sharing a post with a group will create a photo that only the group can see.
 	 * - Sharing a photo again that been shared non public before doesn't alter the permissions.
 	 *
 	 * @return string
 	 * @throws \Exception
 	 */
-	public static function setPermissionFromBody($body, $uid, $original_contact_id, $str_contact_allow, $str_group_allow, $str_contact_deny, $str_group_deny)
+	public static function setPermissionFromBody($body, $uid, $original_contact_id, $str_contact_allow, $str_circle_allow, $str_contact_deny, $str_circle_deny)
 	{
 		// Simplify image codes
 		$img_body = preg_replace("/\[img\=([0-9]*)x([0-9]*)\](.*?)\[\/img\]/ism", '[img]$3[/img]', $body);
@@ -866,32 +877,32 @@ class Photo
 			/**
 			 * @todo Existing permissions need to be mixed with the new ones.
 			 * Otherwise this creates problems with sharing the same picture multiple times
-			 * Also check if $str_contact_allow does contain a public forum.
+			 * Also check if $str_contact_allow does contain a public group.
 			 * Then set the permissions to public.
 			 */
 
-			self::setPermissionForRessource($image_rid, $uid, $str_contact_allow, $str_group_allow, $str_contact_deny, $str_group_deny);
+			self::setPermissionForResource($image_rid, $uid, $str_contact_allow, $str_circle_allow, $str_contact_deny, $str_circle_deny);
 		}
 
 		return true;
 	}
 
 	/**
-	 * Add permissions to photo ressource
+	 * Add permissions to photo resource
 	 * @todo mix with previous photo permissions
 	 *
 	 * @param string $image_rid
 	 * @param integer $uid
 	 * @param string $str_contact_allow
-	 * @param string $str_group_allow
+	 * @param string $str_circle_allow
 	 * @param string $str_contact_deny
-	 * @param string $str_group_deny
+	 * @param string $str_circle_deny
 	 * @return void
 	 */
-	public static function setPermissionForRessource(string $image_rid, int $uid, string $str_contact_allow, string $str_group_allow, string $str_contact_deny, string $str_group_deny)
+	public static function setPermissionForResource(string $image_rid, int $uid, string $str_contact_allow, string $str_circle_allow, string $str_contact_deny, string $str_circle_deny)
 	{
-		$fields = ['allow_cid' => $str_contact_allow, 'allow_gid' => $str_group_allow,
-		'deny_cid' => $str_contact_deny, 'deny_gid' => $str_group_deny,
+		$fields = ['allow_cid' => $str_contact_allow, 'allow_gid' => $str_circle_allow,
+		'deny_cid' => $str_contact_deny, 'deny_gid' => $str_circle_deny,
 		'accessible' => DI::pConfig()->get($uid, 'system', 'accessible-photos', false)];
 
 		$condition = ['resource-id' => $image_rid, 'uid' => $uid];
@@ -907,9 +918,7 @@ class Photo
 	 */
 	public static function getResourceData(string $name): array
 	{
-		$base = DI::baseUrl()->get();
-
-		$guid = str_replace([Strings::normaliseLink($base), '/photo/'], '', Strings::normaliseLink($name));
+		$guid = str_replace([Strings::normaliseLink((string)DI::baseUrl()), '/photo/'], '', Strings::normaliseLink($name));
 
 		if (parse_url($guid, PHP_URL_SCHEME)) {
 			return [];
@@ -971,15 +980,42 @@ class Photo
 	 */
 	public static function isLocalPage(string $name): bool
 	{
-		$base = DI::baseUrl()->get();
-
-		$guid = str_replace(Strings::normaliseLink($base), '', Strings::normaliseLink($name));
+		$guid = str_replace(Strings::normaliseLink((string)DI::baseUrl()), '', Strings::normaliseLink($name));
 		$guid = preg_replace("=/photos/.*/image/(.*)=ism", '$1', $guid);
 		if (empty($guid)) {
 			return false;
 		}
 
 		return DBA::exists('photo', ['resource-id' => $guid]);
+	}
+
+	/**
+	 * Resize to a given maximum file size
+	 *
+	 * @param Image $image
+	 * @param integer $maximagesize
+	 * @return Image
+	 */
+	public static function resizeToFileSize(Image $image, int $maximagesize): Image
+	{
+		$filesize = strlen($image->asString());
+		$width    = $image->getWidth();
+		$height   = $image->getHeight();
+
+		if ($maximagesize && ($filesize > $maximagesize)) {
+			// Scale down to multiples of 640 until the maximum size isn't exceeded anymore
+			foreach ([5120, 2560, 1280, 640, 320] as $pixels) {
+				if (($filesize > $maximagesize) && (max($width, $height) > $pixels)) {
+					Logger::info('Resize', ['size' => $filesize, 'width' => $width, 'height' => $height, 'max' => $maximagesize, 'pixels' => $pixels]);
+					$image->scaleDown($pixels);
+					$filesize = strlen($image->asString());
+					$width = $image->getWidth();
+					$height = $image->getHeight();
+				}
+			}
+		}
+
+		return $image;
 	}
 
 	/**
@@ -996,30 +1032,7 @@ class Photo
 			Logger::info('File upload: Scaling picture to new size', ['max-length' => $max_length]);
 		}
 
-		$filesize = strlen($image->asString());
-		$width    = $image->getWidth();
-		$height   = $image->getHeight();
-
-		$maximagesize = Strings::getBytesFromShorthand(DI::config()->get('system', 'maximagesize'));
-
-		if ($maximagesize && ($filesize > $maximagesize)) {
-			// Scale down to multiples of 640 until the maximum size isn't exceeded anymore
-			foreach ([5120, 2560, 1280, 640] as $pixels) {
-				if (($filesize > $maximagesize) && (max($width, $height) > $pixels)) {
-					Logger::info('Resize', ['size' => $filesize, 'width' => $width, 'height' => $height, 'max' => $maximagesize, 'pixels' => $pixels]);
-					$image->scaleDown($pixels);
-					$filesize = strlen($image->asString());
-					$width = $image->getWidth();
-					$height = $image->getHeight();
-				}
-			}
-			if ($filesize > $maximagesize) {
-				Logger::notice('Image size is too big', ['size' => $filesize, 'max' => $maximagesize]);
-				return null;
-			}
-		}
-
-		return $image;
+		return self::resizeToFileSize($image, Strings::getBytesFromShorthand(DI::config()->get('system', 'maximagesize')));
 	}
 
 	/**
@@ -1137,7 +1150,7 @@ class Photo
 			return [];
 		}
 
-		return ['image' => $image, 'filename' => $filename];
+		return ['image' => $image, 'filename' => $filename, 'size' => $filesize];
 	}
 
 	/**
@@ -1171,8 +1184,7 @@ class Photo
 
 		$image    = $data['image'];
 		$filename = $data['filename'];
-		$width    = $image->getWidth();
-		$height   = $image->getHeight();
+		$filesize = $data['size'];
 
 		$resource_id = $resource_id ?: self::newResource();
 		$album       = $album ?: DI::l10n()->t('Wall Photos');
@@ -1182,28 +1194,10 @@ class Photo
 			$allow_gid = '';
 		}
 
-		$smallest = 0;
-
-		$r = self::store($image, $user['uid'], 0, $resource_id, $filename, $album, 0, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $desc);
-		if (!$r) {
+		$preview = self::storeWithPreview($image, $user['uid'], $resource_id, $filename, $filesize, $album, $desc, $allow_cid, $allow_gid, $deny_cid, $deny_gid);
+		if ($preview < 0) {
 			Logger::warning('Photo could not be stored', ['uid' => $user['uid'], 'resource_id' => $resource_id, 'filename' => $filename, 'album' => $album]);
 			return [];
-		}
-
-		if ($width > 640 || $height > 640) {
-			$image->scaleDown(640);
-			$r = self::store($image, $user['uid'], 0, $resource_id, $filename, $album, 1, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $desc);
-			if ($r) {
-				$smallest = 1;
-			}
-		}
-
-		if ($width > 320 || $height > 320) {
-			$image->scaleDown(320);
-			$r = self::store($image, $user['uid'], 0, $resource_id, $filename, $album, 2, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $desc);
-			if ($r && ($smallest == 0)) {
-				$smallest = 2;
-			}
 		}
 
 		$condition = ['resource-id' => $resource_id];
@@ -1223,10 +1217,60 @@ class Photo
 		$picture['type']        = $photo['type'];
 		$picture['albumpage']   = DI::baseUrl() . '/photos/' . $user['nickname'] . '/image/' . $resource_id;
 		$picture['picture']     = DI::baseUrl() . '/photo/' . $resource_id . '-0.' . $image->getExt();
-		$picture['preview']     = DI::baseUrl() . '/photo/' . $resource_id . '-' . $smallest . '.' . $image->getExt();
+		$picture['preview']     = DI::baseUrl() . '/photo/' . $resource_id . '-' . $preview . '.' . $image->getExt();
 
 		Logger::info('upload done', ['picture' => $picture]);
 		return $picture;
+	}
+
+	/**
+	 * store photo metadata in db and binary with preview photos in default backend
+	 *
+	 * @param Image   $image       Image object with data
+	 * @param integer $uid         User ID
+	 * @param string  $resource_id Resource ID
+	 * @param string  $filename    Filename
+	 * @param integer $filesize    Filesize
+	 * @param string  $album       Album name
+	 * @param string  $description Photo caption
+	 * @param string  $allow_cid   Permissions, allowed contacts
+	 * @param string  $allow_gid   Permissions, allowed circles
+	 * @param string  $deny_cid    Permissions, denied contacts
+	 * @param string  $deny_gid    Permissions, denied circles
+	 *
+	 * @return integer preview photo size
+	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
+	 */
+	public static function storeWithPreview(Image $image, int $uid, string $resource_id, string $filename, int $filesize, string $album, string $description, string $allow_cid, string $allow_gid, string $deny_cid, string $deny_gid): int
+	{
+		$image = self::resizeToFileSize($image, Strings::getBytesFromShorthand(DI::config()->get('system', 'maximagesize')));
+
+		$width   = $image->getWidth();
+		$height  = $image->getHeight();
+		$preview = 0;
+
+		$result = self::store($image, $uid, 0, $resource_id, $filename, $album, 0, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $description);
+		if (!$result) {
+			Logger::warning('Photo could not be stored', ['uid' => $uid, 'resource_id' => $resource_id, 'filename' => $filename, 'album' => $album]);
+			return -1;
+		}
+
+		if ($width > Proxy::PIXEL_MEDIUM || $height > Proxy::PIXEL_MEDIUM) {
+			$image->scaleDown(Proxy::PIXEL_MEDIUM);
+		}
+
+		if ($width > Proxy::PIXEL_SMALL || $height > Proxy::PIXEL_SMALL) {
+			$result = self::store($image, $uid, 0, $resource_id, $filename, $album, 1, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $description);
+			if ($result) {
+				$preview = 1;
+			}
+			$image->scaleDown(Proxy::PIXEL_SMALL);
+			$result = self::store($image, $uid, 0, $resource_id, $filename, $album, 2, self::DEFAULT, $allow_cid, $allow_gid, $deny_cid, $deny_gid, $description);
+			if ($result && ($preview == 0)) {
+				$preview = 2;
+			}
+		}
+		return $preview;
 	}
 
 	/**

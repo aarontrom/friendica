@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -30,8 +30,8 @@ use Friendica\Model\Contact;
 
 function update_contact_content(App $a)
 {
-	if (!empty(DI::args()->get(1)) && (!empty($_GET['force']) || !DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'no_auto_update'))) {
-		$contact = Contact::getById(DI::args()->get(1), ['id', 'deleted']);
+	if (!empty(DI::args()->get(1)) && !empty($_GET['force'])) {
+		$contact = DBA::selectFirst('account-user-view', ['pid', 'deleted'], ['id' => DI::args()->get(1)]);
 		if (DBA::isResult($contact) && empty($contact['deleted'])) {
 			DI::page()['aside'] = '';
 
@@ -39,7 +39,7 @@ function update_contact_content(App $a)
 				$item = Post::selectFirst(['parent'], ['id' => $_GET['item']]);
 			}
 
-			$text = Contact::getPostsFromId($contact['id'], true, true, $item['parent'] ?? 0);
+			$text = Contact::getThreadsFromId($contact['pid'], DI::userSession()->getLocalUserId(), true, $item['parent'] ?? 0, $_GET['last_received'] ?? '');
 		}
 	}
 

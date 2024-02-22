@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -127,10 +127,33 @@ class ApiResponseTest extends MockedTest
 		$baseUrl     = \Mockery::mock(BaseURL::class);
 		$twitterUser = \Mockery::mock(User::class);
 
-		$response = new ApiResponse($l10n, $args, new NullLogger(), $baseUrl, $twitterUser);
+		$logger = \Mockery::mock(NullLogger::class);
+		$logger->shouldReceive('info')->withArgs(['Unimplemented API call', ['method' => 'all', 'path' => '', 'agent' => '', 'request' => []]]);
+
+		$response = new ApiResponse($l10n, $args, $logger, $baseUrl, $twitterUser);
 		$response->unsupported();
 
-		self::assertEquals('{"error":"API endpoint %s %s is not implemented","error_description":"The API endpoint is currently not implemented but might be in the future."}', $response->getContent());
+		self::assertEquals('{"error":"API endpoint %s %s is not implemented but might be in the future.","code":"501 Not Implemented","request":""}', $response->getContent());
+	}
+
+	public function testUnsupportedUserAgent()
+	{
+		$l10n = \Mockery::mock(L10n::class);
+		$l10n->shouldReceive('t')->andReturnUsing(function ($args) {
+			return $args;
+		});
+		$args = \Mockery::mock(Arguments::class);
+		$args->shouldReceive('getQueryString')->andReturn('');
+		$baseUrl     = \Mockery::mock(BaseURL::class);
+		$twitterUser = \Mockery::mock(User::class);
+
+		$logger = \Mockery::mock(NullLogger::class);
+		$logger->shouldReceive('info')->withArgs(['Unimplemented API call', ['method' => 'all', 'path' => '', 'agent' => 'PHPUnit', 'request' => []]]);
+
+		$response = new ApiResponse($l10n, $args, $logger, $baseUrl, $twitterUser, ['HTTP_USER_AGENT' => 'PHPUnit']);
+		$response->unsupported();
+
+		self::assertEquals('{"error":"API endpoint %s %s is not implemented but might be in the future.","code":"501 Not Implemented","request":""}', $response->getContent());
 	}
 
 	/**
@@ -248,6 +271,40 @@ class ApiResponseTest extends MockedTest
 
 		$data = ['some_data'];
 		self::assertEquals($data, $response->formatData('root_element', 'json', $data));
+	}
+
+	public function testApiExitWithJson()
+	{
+		$l10n = \Mockery::mock(L10n::class);
+		$l10n->shouldReceive('t')->andReturnUsing(function ($args) {
+			return $args;
+		});
+		$args = \Mockery::mock(Arguments::class);
+		$args->shouldReceive('getQueryString')->andReturn('');
+		$baseUrl     = \Mockery::mock(BaseURL::class);
+		$twitterUser = \Mockery::mock(User::class);
+
+		$response = new ApiResponse($l10n, $args, new NullLogger(), $baseUrl, $twitterUser);
+		$response->addJsonContent(['some_data']);
+
+		self::assertEquals('["some_data"]', $response->getContent());
+	}
+
+	public function testApiExitWithJsonP()
+	{
+		$l10n = \Mockery::mock(L10n::class);
+		$l10n->shouldReceive('t')->andReturnUsing(function ($args) {
+			return $args;
+		});
+		$args = \Mockery::mock(Arguments::class);
+		$args->shouldReceive('getQueryString')->andReturn('');
+		$baseUrl     = \Mockery::mock(BaseURL::class);
+		$twitterUser = \Mockery::mock(User::class);
+
+		$response = new ApiResponse($l10n, $args, new NullLogger(), $baseUrl, $twitterUser, [], 'JsonPCallback');
+		$response->addJsonContent(['some_data']);
+
+		self::assertEquals('JsonPCallback(["some_data"])', $response->getContent());
 	}
 
 	/**

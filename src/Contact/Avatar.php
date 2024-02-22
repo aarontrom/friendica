@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -73,7 +73,12 @@ class Avatar
 			return $fields;
 		}
 
-		$fetchResult = HTTPSignature::fetchRaw($avatar, 0, [HttpClientOptions::ACCEPT_CONTENT => [HttpClientAccept::IMAGE]]);
+		try {
+			$fetchResult = HTTPSignature::fetchRaw($avatar, 0, [HttpClientOptions::ACCEPT_CONTENT => [HttpClientAccept::IMAGE]]);
+		} catch (\Exception $exception) {
+			Logger::notice('Avatar is invalid', ['avatar' => $avatar, 'exception' => $exception]);
+			return $fields;
+		}
 
 		$img_str = $fetchResult->getBody();
 		if (empty($img_str)) {
@@ -87,7 +92,7 @@ class Avatar
 			return $fields;
 		}
 
-		$filename  = self::getFilename($contact['url']);
+		$filename  = self::getFilename($contact['url'], $avatar);
 		$timestamp = time();
 
 		$fields['blurhash'] = $image->getBlurHash();
@@ -115,7 +120,7 @@ class Avatar
 			return $fields;
 		}
 
-		$filename  = self::getFilename($contact['url']);
+		$filename  = self::getFilename($contact['url'], $contact['avatar']);
 		$timestamp = time();
 
 		$fields['photo'] = self::storeAvatarCache($image, $filename, Proxy::PIXEL_SMALL, $timestamp);
@@ -125,9 +130,9 @@ class Avatar
 		return $fields;
 	}
 
-	private static function getFilename(string $url): string
+	private static function getFilename(string $url, string $host): string
 	{
-		$guid = Item::guidFromUri($url);
+		$guid = Item::guidFromUri($url, $host);
 
 		return substr($guid, 0, 2) . '/' . substr($guid, 3, 2) . '/' . substr($guid, 5, 3) . '/' .
 			substr($guid, 9, 2) .'/' . substr($guid, 11, 2) . '/' . substr($guid, 13, 4). '/' . substr($guid, 18) . '-';
@@ -246,13 +251,16 @@ class Avatar
 	 * Delete locally cached avatar pictures of a contact
 	 *
 	 * @param string $avatar
-	 * @return void
+	 * @return bool
 	 */
-	public static function deleteCache(array $contact)
+	public static function deleteCache(array $contact): bool
 	{
+		$existed = (self::isCacheFile($contact['photo']) || self::isCacheFile($contact['thumb']) || self::isCacheFile($contact['micro']));
 		self::deleteCacheFile($contact['photo']);
 		self::deleteCacheFile($contact['thumb']);
 		self::deleteCacheFile($contact['micro']);
+
+		return $existed;
 	}
 
 	/**

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -27,7 +27,7 @@
  */
 
 use Friendica\App;
-use Friendica\Content\ForumManager;
+use Friendica\Content\GroupManager;
 use Friendica\Core\Addon;
 use Friendica\Core\Renderer;
 use Friendica\Core\Search;
@@ -137,17 +137,16 @@ function vier_community_info()
 	$show_lastusers  = get_vier_config("show_lastusers", 1);
 
 	// get_baseurl
-	$url = DI::baseUrl();
-	$aside['$url'] = $url;
+	$aside['$url'] = $url = (string)DI::baseUrl();
 
-	// comunity_profiles
+	// community_profiles
 	if ($show_profiles) {
 		$contacts = Contact\Relation::getCachedSuggestions(DI::userSession()->getLocalUserId(), 0, 9);
 
 		$tpl = Renderer::getMarkupTemplate('ch_directory_item.tpl');
 		if (DBA::isResult($contacts)) {
-			$aside['$comunity_profiles_title'] = DI::l10n()->t('Community Profiles');
-			$aside['$comunity_profiles_items'] = [];
+			$aside['$community_profiles_title'] = DI::l10n()->t('Community Profiles');
+			$aside['$community_profiles_items'] = [];
 
 			foreach ($contacts as $contact) {
 				$entry = Renderer::replaceMacros($tpl, [
@@ -156,7 +155,7 @@ function vier_community_info()
 					'$photo' => Contact::getMicro($contact),
 					'$alt_text' => $contact['name'],
 				]);
-				$aside['$comunity_profiles_items'][] = $entry;
+				$aside['$community_profiles_items'][] = $entry;
 			}
 		}
 	}
@@ -209,7 +208,7 @@ function vier_community_info()
 
 	//Community_Pages at right_aside
 	if ($show_pages && DI::userSession()->getLocalUserId()) {
-		$aside['$page'] = ForumManager::widget('network/forum', DI::userSession()->getLocalUserId());;
+		$aside['$page'] = GroupManager::widget('network/group', DI::userSession()->getLocalUserId());;
 	}
 	// END Community Page
 

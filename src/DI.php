@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,6 +22,8 @@
 namespace Friendica;
 
 use Dice\Dice;
+use Friendica\Core\Logger\Capability\ICheckLoggerSettings;
+use Friendica\Core\Logger\Util\LoggerSettingsCheck;
 use Friendica\Core\Session\Capability\IHandleSessions;
 use Friendica\Core\Session\Capability\IHandleUserSessions;
 use Friendica\Navigation\SystemMessages;
@@ -37,14 +39,39 @@ abstract class DI
 	/** @var Dice */
 	private static $dice;
 
-	public static function init(Dice $dice)
+	/**
+	 * Initialize the singleton DI container with the Dice instance
+	 *
+	 * @param Dice $dice             The Dice instance
+	 * @param bool $disableDepByHand If true, the database dependencies aren't set, thus any occurrence of logging or
+	 *                               profiling in database methods would lead to an error. This flag is for testing only.
+	 *
+	 * @return void
+	 */
+	public static function init(Dice $dice, bool $disableDepByHand = false)
 	{
 		self::$dice = $dice;
+
+		if (!$disableDepByHand) {
+			self::setCompositeRootDependencyByHand();
+		}
+	}
+
+	/**
+	 * I HATE this method, but everything else needs refactoring at the database itself
+	 * Set the database dependencies manually, because of current, circular dependencies between the database and the config table
+	 *
+	 * @todo Instead of this madness, split the database in a core driver-dependent (mysql, mariadb, postgresql, ..) part without any other dependency unlike credentials and in the full-featured, driver-independent database class with all dependencies
+	 */
+	public static function setCompositeRootDependencyByHand()
+	{
+		$database = static::dba();
+		$database->setDependency(static::config(), static::profiler(), static::logger());
 	}
 
 	/**
 	 * Returns a clone of the current dice instance
-	 * This usefull for overloading the current instance with mocked methods during tests
+	 * This useful for overloading the current instance with mocked methods during tests
 	 *
 	 * @return Dice
 	 */
@@ -101,10 +128,7 @@ abstract class DI
 		return self::$dice->create(App\Arguments::class);
 	}
 
-	/**
-	 * @return App\BaseURL
-	 */
-	public static function baseUrl()
+	public static function baseUrl(): App\BaseURL
 	{
 		return self::$dice->create(App\BaseURL::class);
 	}
@@ -179,6 +203,16 @@ abstract class DI
 	public static function config()
 	{
 		return self::$dice->create(Core\Config\Capability\IManageConfigValues::class);
+	}
+
+	public static function configFileManager(): Core\Config\Util\ConfigFileManager
+	{
+		return self::$dice->create(Core\Config\Util\ConfigFileManager::class);
+	}
+
+	public static function keyValue(): Core\KeyValueStorage\Capability\IManageKeyValuePairs
+	{
+		return self::$dice->create(Core\KeyValueStorage\Capability\IManageKeyValuePairs::class);
 	}
 
 	/**
@@ -263,6 +297,11 @@ abstract class DI
 		static::init($flushDice);
 	}
 
+	public static function logCheck(): ICheckLoggerSettings
+	{
+		return self::$dice->create(LoggerSettingsCheck::class);
+	}
+
 	/**
 	 * @return LoggerInterface
 	 */
@@ -345,14 +384,6 @@ abstract class DI
 	public static function mstdnError()
 	{
 		return self::$dice->create(Factory\Api\Mastodon\Error::class);
-	}
-
-	/**
-	 * @return Factory\Api\Mastodon\FollowRequest
-	 */
-	public static function mstdnFollowRequest()
-	{
-		return self::$dice->create(Factory\Api\Mastodon\FollowRequest::class);
 	}
 
 	/**
@@ -517,6 +548,43 @@ abstract class DI
 	}
 
 	/**
+	 * @return Content\Conversation\Factory\Timeline
+	 */
+	public static function TimelineFactory()
+	{
+		return self::$dice->create(Content\Conversation\Factory\Timeline::class);
+	}
+
+	/**
+	 * @return Content\Conversation\Factory\Community
+	 */
+	public static function CommunityFactory()
+	{
+		return self::$dice->create(Content\Conversation\Factory\Community::class);
+	}
+
+	/**
+	 * @return Content\Conversation\Factory\Channel
+	 */
+	public static function ChannelFactory()
+	{
+		return self::$dice->create(Content\Conversation\Factory\Channel::class);
+	}
+
+	public static function userDefinedChannel(): Content\Conversation\Repository\UserDefinedChannel
+	{
+		return self::$dice->create(Content\Conversation\Repository\UserDefinedChannel::class);
+	}
+
+	/**
+	 * @return Content\Conversation\Factory\Network
+	 */
+	public static function NetworkFactory()
+	{
+		return self::$dice->create(Content\Conversation\Factory\Network::class);
+	}
+
+	/**
 	 * @return Contact\Introduction\Repository\Introduction
 	 */
 	public static function intro()
@@ -530,6 +598,16 @@ abstract class DI
 	public static function introFactory()
 	{
 		return self::$dice->create(Contact\Introduction\Factory\Introduction::class);
+	}
+
+	public static function report(): Moderation\Repository\Report
+	{
+		return self::$dice->create(Moderation\Repository\Report::class);
+	}
+
+	public static function reportFactory(): Moderation\Factory\Report
+	{
+		return self::$dice->create(Moderation\Factory\Report::class);
 	}
 
 	public static function localRelationship(): Contact\LocalRelationship\Repository\LocalRelationship
@@ -588,6 +666,20 @@ abstract class DI
 	}
 
 	//
+	// "Federation" namespace instances
+	//
+
+	public static function deliveryQueueItemFactory(): Federation\Factory\DeliveryQueueItem
+	{
+		return self::$dice->create(Federation\Factory\DeliveryQueueItem::class);
+	}
+
+	public static function deliveryQueueItemRepo(): Federation\Repository\DeliveryQueueItem
+	{
+		return self::$dice->create(Federation\Repository\DeliveryQueueItem::class);
+	}
+
+	//
 	// "Protocol" namespace instances
 	//
 
@@ -614,6 +706,15 @@ abstract class DI
 	public static function auth()
 	{
 		return self::$dice->create(Security\Authentication::class);
+	}
+
+	//
+	// "User" namespace instances
+	//
+
+	public static function userGServer(): User\Settings\Repository\UserGServer
+	{
+		return self::$dice->create(User\Settings\Repository\UserGServer::class);
 	}
 
 	//
@@ -645,14 +746,6 @@ abstract class DI
 	}
 
 	/**
-	 * @return Util\FileSystem
-	 */
-	public static function fs()
-	{
-		return self::$dice->create(Util\FileSystem::class);
-	}
-
-	/**
 	 * @return Util\Profiler
 	 */
 	public static function profiler()
@@ -666,5 +759,10 @@ abstract class DI
 	public static function emailer()
 	{
 		return self::$dice->create(Util\Emailer::class);
+	}
+
+	public static function postMediaRepository(): Content\Post\Repository\PostMedia
+	{
+		return self::$dice->create(Content\Post\Repository\PostMedia::class);
 	}
 }

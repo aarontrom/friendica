@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -27,7 +27,6 @@ use Exception;
 use Friendica\Core\Hook;
 use Friendica\Core\Logger;
 use Friendica\Core\Protocol;
-use Friendica\Core\System;
 use Friendica\Database\DBA;
 use Friendica\DI;
 use Friendica\Model\Contact;
@@ -44,6 +43,7 @@ use Friendica\Protocol\Feed;
 use Friendica\Protocol\Salmon;
 use Friendica\Util\Crypto;
 use Friendica\Util\DateTimeFormat;
+use Friendica\Util\HTTPSignature;
 use Friendica\Util\Network;
 use Friendica\Util\Strings;
 use Friendica\Util\XML;
@@ -63,7 +63,7 @@ class Probe
 	private static $baseurl;
 
 	/**
-	 * @var boolean Whether a timeout has occured
+	 * @var boolean Whether a timeout has occurred
 	 */
 	private static $isTimeout;
 
@@ -120,6 +120,15 @@ class Probe
 
 		$numeric_fields = ['gsid', 'hide', 'account-type', 'manually-approve'];
 
+		if (!empty($data['photo'])) {
+			$data['photo'] = Network::addBasePath($data['photo'], $data['url']);
+
+			if (!Network::isValidHttpUrl($data['photo'])) {
+				Logger::warning('Invalid URL for photo', ['url' => $data['url'], 'photo' => $data['photo']]);
+				unset($data['photo']);
+			}
+		}
+
 		$newdata = [];
 		foreach ($fields as $field) {
 			if (isset($data[$field])) {
@@ -139,8 +148,17 @@ class Probe
 		foreach ([Protocol::DIASPORA, Protocol::OSTATUS] as $network) {
 			if (!empty($data['networks'][$network])) {
 				$data['networks'][$network]['subscribe'] = $newdata['subscribe'] ?? '';
-				$data['networks'][$network]['baseurl'] = $newdata['baseurl'] ?? '';
-				$data['networks'][$network]['gsid'] = $newdata['gsid'] ?? 0;
+				if (empty($data['networks'][$network]['baseurl'])) {
+					$data['networks'][$network]['baseurl'] = $newdata['baseurl'] ?? '';
+				} else {
+					$newdata['baseurl'] = $data['networks'][$network]['baseurl'];
+				}
+				if (!empty($newdata['baseurl'])) {
+					$newdata['gsid'] = $data['networks'][$network]['gsid'] = GServer::getID($newdata['baseurl']);
+				} else {
+					$newdata['gsid'] = $data['networks'][$network]['gsid'] = null;
+				}
+
 				$newdata['networks'][$network] = self::rearrangeData($data['networks'][$network]);
 				unset($newdata['networks'][$network]['networks']);
 			}
@@ -160,7 +178,7 @@ class Probe
 	 */
 	private static function ownHost(string $host): bool
 	{
-		$own_host = DI::baseUrl()->getHostname();
+		$own_host = DI::baseUrl()->getHost();
 
 		$parts = parse_url($host);
 
@@ -201,7 +219,7 @@ class Probe
 
 		$xrd_timeout = DI::config()->get('system', 'xrd_timeout', 20);
 
-		Logger::info('Probing', ['host' => $host, 'ssl_url' => $ssl_url, 'url' => $url, 'callstack' => System::callstack(20)]);
+		Logger::info('Probing', ['host' => $host, 'ssl_url' => $ssl_url, 'url' => $url]);
 		$xrd = null;
 
 		$curlResult = DI::httpClient()->get($ssl_url, HttpClientAccept::XRD_XML, [HttpClientOptions::TIMEOUT => $xrd_timeout]);
@@ -323,7 +341,6 @@ class Probe
 	 * @param string  $uri     Address that should be probed
 	 * @param string  $network Test for this specific network
 	 * @param integer $uid     User ID for the probe (only used for mails)
-	 * @param boolean $cache   Use cached values?
 	 *
 	 * @return array uri data
 	 * @throws HTTPException\InternalServerErrorException
@@ -398,13 +415,18 @@ class Probe
 			}
 		}
 
-		if (!empty($data['baseurl']) && empty($data['gsid'])) {
-			$data['gsid'] = GServer::getID($data['baseurl']);
-		}
-
 		if (empty($data['network'])) {
 			$data['network'] = Protocol::PHANTOM;
 		}
+
+		$baseurl = parse_url($data['url'], PHP_URL_SCHEME) . '://' . parse_url($data['url'], PHP_URL_HOST);
+		if (empty($data['baseurl']) && ($data['network'] == Protocol::ACTIVITYPUB) && (rtrim($data['url'], '/') == $baseurl)) {
+			$data['baseurl'] = $baseurl;
+		}
+
+		if (!empty($data['baseurl']) && empty($data['gsid'])) {
+			$data['gsid'] = GServer::getID($data['baseurl']);
+		}	
 
 		// Ensure that local connections always are DFRN
 		if (($network == '') && ($data['network'] != Protocol::PHANTOM) && (self::ownHost($data['baseurl'] ?? '') || self::ownHost($data['url']))) {
@@ -510,7 +532,7 @@ class Probe
 	 * @return array Webfinger data
 	 * @throws HTTPException\InternalServerErrorException
 	 */
-	private static function getWebfingerArray(string $uri): array
+	public static function getWebfingerArray(string $uri): array
 	{
 		$parts = parse_url($uri);
 
@@ -746,13 +768,13 @@ class Probe
 			$result = self::zot($webfinger, $result, $baseurl);
 		}
 		if ((!$result && ($network == '')) || ($network == Protocol::PUMPIO)) {
-			$result = self::pumpio($webfinger, $addr);
+			$result = self::pumpio($webfinger, $addr, $baseurl);
 		}
 		if (empty($result['network']) && empty($ap_profile['network']) || ($network == Protocol::FEED)) {
 			$result = self::feed($uri);
 		} else {
-			// We overwrite the detected nick with our try if the previois routines hadn't detected it.
-			// Additionally it is overwritten when the nickname doesn't make sense (contains spaces).
+			// We overwrite the detected nick with our try if the previous routines hadn't detected it.
+			// Additionally, it is overwritten when the nickname doesn't make sense (contains spaces).
 			if ((empty($result['nick']) || (strstr($result['nick'], ' '))) && ($nick != '')) {
 				$result['nick'] = $nick;
 			}
@@ -934,9 +956,17 @@ class Probe
 	 */
 	public static function webfinger(string $url, string $type): array
 	{
-		$xrd_timeout = DI::config()->get('system', 'xrd_timeout', 20);
+		try {
+			$curlResult = DI::httpClient()->get(
+				$url,
+				$type,
+				[HttpClientOptions::TIMEOUT => DI::config()->get('system', 'xrd_timeout', 20)]
+			);
+		} catch (\Throwable $e) {
+			Logger::notice($e->getMessage(), ['url' => $url, 'type' => $type, 'class' => get_class($e)]);
+			return [];
+		}
 
-		$curlResult = DI::httpClient()->get($url, $type, [HttpClientOptions::TIMEOUT => $xrd_timeout]);
 		if ($curlResult->isTimeout()) {
 			self::$isTimeout = true;
 			return [];
@@ -1155,7 +1185,6 @@ class Probe
 			$data = self::pollHcard($profile_link, $data, true);
 		}
 
-		$prof_data = [];
 
 		if (empty($data['addr']) || empty($data['nick'])) {
 			$probe_data = self::uri($profile_link);
@@ -1163,15 +1192,17 @@ class Probe
 			$data['nick'] = ($data['nick'] ?? '') ?: $probe_data['nick'];
 		}
 
-		$prof_data['addr']         = $data['addr'];
-		$prof_data['nick']         = $data['nick'];
-		$prof_data['dfrn-request'] = $data['request'] ?? null;
-		$prof_data['dfrn-confirm'] = $data['confirm'] ?? null;
-		$prof_data['dfrn-notify']  = $data['notify']  ?? null;
-		$prof_data['dfrn-poll']    = $data['poll']    ?? null;
-		$prof_data['photo']        = $data['photo']   ?? null;
-		$prof_data['fn']           = $data['name']    ?? null;
-		$prof_data['key']          = $data['pubkey']  ?? null;
+		$prof_data = [
+			'addr'         => $data['addr'],
+			'nick'         => $data['nick'],
+			'dfrn-request' => $data['request'] ?? null,
+			'dfrn-confirm' => $data['confirm'] ?? null,
+			'dfrn-notify'  => $data['notify']  ?? null,
+			'dfrn-poll'    => $data['poll']    ?? null,
+			'photo'        => $data['photo']   ?? null,
+			'fn'           => $data['name']    ?? null,
+			'key'          => $data['pubkey']  ?? null,
+		];
 
 		Logger::debug('Result', ['link' => $profile_link, 'data' => $prof_data]);
 
@@ -1605,7 +1636,7 @@ class Probe
 		if (!empty($feed_data['header']['author-about'])) {
 			$data['about'] = $feed_data['header']['author-about'];
 		}
-		// OStatus has serious issues when the the url doesn't fit (ssl vs. non ssl)
+		// OStatus has serious issues when the url doesn't fit (ssl vs. non ssl)
 		// So we take the value that we just fetched, although the other one worked as well
 		if (!empty($feed_data['header']['author-link'])) {
 			$data['url'] = $feed_data['header']['author-link'];
@@ -1626,7 +1657,7 @@ class Probe
 	 *
 	 * @return array Profile data
 	 */
-	private static function pumpioProfileData(string $profile_link): array
+	private static function pumpioProfileData(string $profile_link, string $baseurl): array
 	{
 		$curlResult = DI::httpClient()->get($profile_link, HttpClientAccept::HTML);
 		if (!$curlResult->isSuccess() || empty($curlResult->getBody())) {
@@ -1670,8 +1701,8 @@ class Probe
 		}
 		if ($avatar) {
 			foreach ($avatar->attributes as $attribute) {
-				if ($attribute->name == 'src') {
-					$data['photo'] = trim($attribute->value);
+				if (($attribute->name == 'src') && !empty($attribute->value)) {
+					$data['photo'] = Network::addBasePath($attribute->value, $baseurl);
 				}
 			}
 		}
@@ -1687,7 +1718,7 @@ class Probe
 	 *
 	 * @return array pump.io data
 	 */
-	private static function pumpio(array $webfinger, string $addr): array
+	private static function pumpio(array $webfinger, string $addr, string $baseurl): array
 	{
 		$data = [];
 		// The array is reversed to take into account the order of preference for same-rel links
@@ -1719,7 +1750,7 @@ class Probe
 			return [];
 		}
 
-		$profile_data = self::pumpioProfileData($data['url']);
+		$profile_data = self::pumpioProfileData($data['url'], $baseurl);
 
 		if (!$profile_data) {
 			return [];
@@ -1830,7 +1861,7 @@ class Probe
 		unset($baseParts['query']);
 		unset($baseParts['fragment']);
 
-		return Network::unparseURL($baseParts);
+		return Network::unparseURL((array)$baseParts);
 	}
 
 	/**
@@ -1844,11 +1875,18 @@ class Probe
 	 */
 	private static function feed(string $url, bool $probe = true): array
 	{
-		$curlResult = DI::httpClient()->get($url, HttpClientAccept::FEED_XML);
+		try {
+			$curlResult = DI::httpClient()->get($url, HttpClientAccept::FEED_XML);
+		} catch(\Throwable $e) {
+			DI::logger()->info('Error requesting feed URL', ['url' => $url, 'exception' => $e]);
+			return [];
+		}
+
 		if ($curlResult->isTimeout()) {
 			self::$isTimeout = true;
 			return [];
 		}
+
 		$feed = $curlResult->getBody();
 		$feed_data = Feed::import($feed);
 
@@ -2095,7 +2133,7 @@ class Probe
 	 */
 	private static function updateFromOutbox(string $feed, array $data): string
 	{
-		$outbox = ActivityPub::fetchContent($feed);
+		$outbox = HTTPSignature::fetch($feed);
 		if (empty($outbox)) {
 			return '';
 		}
@@ -2211,7 +2249,7 @@ class Probe
 			$approfile = ActivityPub\Transmitter::getProfile($uid);
 
 			$split_name = Diaspora::splitName($owner['name']);
-	
+
 			if (empty($owner['gsid'])) {
 				$owner['gsid'] = GServer::getID($approfile['generator']['url']);
 			}
@@ -2248,14 +2286,14 @@ class Probe
 						'batch'        => $approfile['generator']['url'] . '/receive/public',
 						'notify'       => $owner['notify'],
 						'poll'         => $owner['poll'],
-						'poco'         => $owner['poco'],						
+						'poco'         => $owner['poco'],
 						'network'      => Protocol::DIASPORA,
 						'pubkey'       => $owner['upubkey'],
 					]
 				]
 			];
 		} catch (Exception $e) {
-			// Default values for non existing targets
+			// Default values for nonexistent targets
 			$data = [
 				'name' => $url, 'nick' => $url, 'url' => $url, 'network' => Protocol::PHANTOM,
 				'photo' => DI::baseUrl() . Contact::DEFAULT_AVATAR_PHOTO

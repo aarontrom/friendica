@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -25,12 +25,15 @@ use Friendica\Content\Text\BBCode;
 use Friendica\Content\Text\HTML;
 use Friendica\Core\Config\Capability\IManageConfigValues;
 use Friendica\DI;
+use Friendica\Model\User;
 use Friendica\Module\Response;
 use Friendica\Network\HTTPException\FoundException;
+use Friendica\Network\HTTPException\InternalServerErrorException;
 use Friendica\Network\HTTPException\MovedPermanentlyException;
 use Friendica\Network\HTTPException\TemporaryRedirectException;
 use Friendica\Util\BasePath;
 use Friendica\Util\XML;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -166,7 +169,7 @@ class System
 		$load = System::currentLoad();
 		if ($load) {
 			if (intval($load) > $maxsysload) {
-				$this->logger->warning('system load for process too high.', ['load' => $load, 'process' => 'backend', 'maxsysload' => $maxsysload]);
+				$this->logger->notice('system load for process too high.', ['load' => $load, 'process' => 'backend', 'maxsysload' => $maxsysload]);
 				return true;
 			}
 		}
@@ -217,18 +220,20 @@ class System
 
 		proc_close($resource);
 
-		$this->logger->info('Executed "proc_open"', ['command' => $cmdline, 'callstack' => System::callstack(10)]);
+		$this->logger->info('Executed "proc_open"', ['command' => $cmdline]);
 	}
 
 	/**
 	 * Returns a string with a callstack. Can be used for logging.
 	 *
-	 * @param integer $depth  How many calls to include in the stacks after filtering
-	 * @param int     $offset How many calls to shave off the top of the stack, for example if
-	 *                        this is called from a centralized method that isn't relevant to the callstack
+	 * @param integer $depth   How many calls to include in the stacks after filtering
+	 * @param int     $offset  How many calls to shave off the top of the stack, for example if
+	 *                         this is called from a centralized method that isn't relevant to the callstack
+	 * @param bool    $full    If enabled, the callstack is not compacted
+	 * @param array   $exclude 
 	 * @return string
 	 */
-	public static function callstack(int $depth = 4, int $offset = 0): string
+	public static function callstack(int $depth = 4, int $offset = 0, bool $full = false, array $exclude = []): string
 	{
 		$trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
 
@@ -243,7 +248,11 @@ class System
 
 		while ($func = array_pop($trace)) {
 			if (!empty($func['class'])) {
-				if (in_array($previous['function'], ['insert', 'fetch', 'toArray', 'exists', 'count', 'selectFirst', 'selectToArray',
+				if (in_array($func['class'], $exclude)) {
+					continue;
+				}
+
+				if (!$full && in_array($previous['function'], ['insert', 'fetch', 'toArray', 'exists', 'count', 'selectFirst', 'selectToArray',
 					'select', 'update', 'delete', 'selectFirstForUser', 'selectForUser'])
 					&& (substr($previous['class'], 0, 15) === 'Friendica\Model')) {
 					continue;
@@ -251,14 +260,14 @@ class System
 
 				// Don't show multiple calls from the Database classes to show the essential parts of the callstack
 				$func['database'] = in_array($func['class'], ['Friendica\Database\DBA', 'Friendica\Database\Database']);
-				if (!$previous['database'] || !$func['database']) {
+				if ($full || !$previous['database'] || !$func['database']) {
 					$classparts = explode("\\", $func['class']);
-					$callstack[] = array_pop($classparts).'::'.$func['function'];
+					$callstack[] = array_pop($classparts).'::'.$func['function'] . (isset($func['line']) ? ' (' . $func['line'] . ')' : '');
 					$previous = $func;
 				}
 			} elseif (!in_array($func['function'], $ignore)) {
 				$func['database'] = ($func['function'] == 'q');
-				$callstack[] = $func['function'];
+				$callstack[] = $func['function'] . (isset($func['line']) ? ' (' . $func['line'] . ')' : '');
 				$func['class'] = '';
 				$previous = $func;
 			}
@@ -273,31 +282,58 @@ class System
 	}
 
 	/**
+	 * Display current response, including setting all headers
+	 *
+	 * @param ResponseInterface $response
+	 */
+	public static function echoResponse(ResponseInterface $response)
+	{
+		header(sprintf("HTTP/%s %s %s",
+				$response->getProtocolVersion(),
+				$response->getStatusCode(),
+				$response->getReasonPhrase())
+		);
+
+		foreach ($response->getHeaders() as $key => $header) {
+			if (is_array($header)) {
+				$header_str = implode(',', $header);
+			} else {
+				$header_str = $header;
+			}
+
+			if (is_int($key)) {
+				header($header_str);
+			} else {
+				header("$key: $header_str");
+			}
+		}
+
+		echo $response->getBody();
+	}
+
+	/**
 	 * Generic XML return
 	 * Outputs a basic dfrn XML status structure to STDOUT, with a <status> variable
 	 * of $st and an optional text <message> of $message and terminates the current process.
 	 *
-	 * @param        $st
+	 * @param mixed  $status
 	 * @param string $message
 	 * @throws \Exception
+	 * @deprecated since 2023.09 Use BaseModule->httpExit() instead
 	 */
-	public static function xmlExit($st, $message = '')
+	public static function xmlExit($status, string $message = '')
 	{
-		$result = ['status' => $st];
+		$result = ['status' => $status];
 
 		if ($message != '') {
 			$result['message'] = $message;
 		}
 
-		if ($st) {
-			Logger::notice('xml_status returning non_zero: ' . $st . " message=" . $message);
+		if ($status) {
+			Logger::notice('xml_status returning non_zero: ' . $status . " message=" . $message);
 		}
 
-		DI::apiResponse()->setType(Response::TYPE_XML);
-		DI::apiResponse()->addContent(XML::fromArray(["result" => $result], $xml));
-		DI::page()->exit(DI::apiResponse()->generate());
-
-		self::exit();
+		self::httpExit(XML::fromArray(['result' => $result]), Response::TYPE_XML);
 	}
 
 	/**
@@ -307,40 +343,45 @@ class System
 	 * @param string  $message Error message. Optional.
 	 * @param string  $content Response body. Optional.
 	 * @throws \Exception
+	 * @deprecated since 2023.09 Use BaseModule->httpError instead
 	 */
 	public static function httpError($httpCode, $message = '', $content = '')
 	{
 		if ($httpCode >= 400) {
-			Logger::debug('Exit with error', ['code' => $httpCode, 'message' => $message, 'callstack' => System::callstack(20), 'method' => DI::args()->getMethod(), 'agent' => $_SERVER['HTTP_USER_AGENT'] ?? '']);
+			Logger::debug('Exit with error', ['code' => $httpCode, 'message' => $message, 'method' => DI::args()->getMethod(), 'agent' => $_SERVER['HTTP_USER_AGENT'] ?? '']);
 		}
 		DI::apiResponse()->setStatus($httpCode, $message);
+
+		self::httpExit($content);
+	}
+
+	/**
+	 * This function adds the content and a content-type HTTP header to the output.
+	 * After finishing the process is getting killed.
+	 *
+	 * @param string      $content
+	 * @param string      $type
+	 * @param string|null $content_type
+	 * @return void
+	 * @throws InternalServerErrorException
+	 * @deprecated since 2023.09 Use BaseModule->httpExit() instead
+	 */
+	public static function httpExit(string $content, string $type = Response::TYPE_HTML, ?string $content_type = null)
+	{
+		DI::apiResponse()->setType($type, $content_type);
 		DI::apiResponse()->addContent($content);
-		DI::page()->exit(DI::apiResponse()->generate());
+		self::echoResponse(DI::apiResponse()->generate());
 
 		self::exit();
 	}
 
 	/**
-	 * This function adds the content and a content-teype HTTP header to the output.
-	 * After finishing the process is getting killed.
-	 *
-	 * @param string $content
-	 * @param string $type
-	 * @param string|null $content_type
-	 * @return void
+	 * @deprecated since 2023.09 Use BaseModule->jsonError instead
 	 */
-	public static function httpExit(string $content, string $type = Response::TYPE_HTML, ?string $content_type = null) {
-		DI::apiResponse()->setType($type, $content_type);
-		DI::apiResponse()->addContent($content);
-		DI::page()->exit(DI::apiResponse()->generate());
-
-		self::exit();
-	}
-
 	public static function jsonError($httpCode, $content, $content_type = 'application/json')
 	{
 		if ($httpCode >= 400) {
-			Logger::debug('Exit with error', ['code' => $httpCode, 'content_type' => $content_type, 'callstack' => System::callstack(20), 'method' => DI::args()->getMethod(), 'agent' => $_SERVER['HTTP_USER_AGENT'] ?? '']);
+			Logger::debug('Exit with error', ['code' => $httpCode, 'content_type' => $content_type, 'method' => DI::args()->getMethod(), 'agent' => $_SERVER['HTTP_USER_AGENT'] ?? '']);
 		}
 		DI::apiResponse()->setStatus($httpCode);
 		self::jsonExit($content, $content_type);
@@ -356,14 +397,12 @@ class System
 	 * @param mixed   $content      The input content
 	 * @param string  $content_type Type of the input (Default: 'application/json')
 	 * @param integer $options      JSON options
-	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
+	 * @throws InternalServerErrorException
+	 * @deprecated since 2023.09 Use BaseModule->jsonExit instead
 	 */
-	public static function jsonExit($content, $content_type = 'application/json', int $options = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) {
-		DI::apiResponse()->setType(Response::TYPE_JSON, $content_type);
-		DI::apiResponse()->addContent(json_encode($content, $options));
-		DI::page()->exit(DI::apiResponse()->generate());
-
-		self::exit();
+	public static function jsonExit($content, string $content_type = 'application/json', int $options = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+	{
+		self::httpExit(json_encode($content, $options), Response::TYPE_JSON, $content_type);
 	}
 
 	/**
@@ -401,7 +440,7 @@ class System
 		if (is_bool($prefix) && !$prefix) {
 			$prefix = '';
 		} elseif (empty($prefix)) {
-			$prefix = hash('crc32', DI::baseUrl()->getHostname());
+			$prefix = hash('crc32', DI::baseUrl()->getHost());
 		}
 
 		while (strlen($prefix) < ($size - 13)) {
@@ -445,34 +484,28 @@ class System
 	 */
 	public static function getLoadAvg(bool $get_processes = true): array
 	{
+		$load_arr = sys_getloadavg();
+		if (empty($load_arr)) {
+			return [];
+		}
+
+		$load = [
+			'average1'  => $load_arr[0],
+			'average5'  => $load_arr[1],
+			'average15' => $load_arr[2],
+			'runnable'  => 0,
+			'scheduled' => 0
+		];
+
 		if ($get_processes && @is_readable('/proc/loadavg')) {
 			$content = @file_get_contents('/proc/loadavg');
-			if (empty($content)) {
-				$content = shell_exec('uptime | sed "s/.*averages*: //" | sed "s/,//g"');
+			if (!empty($content) && preg_match("#([.\d]+)\s([.\d]+)\s([.\d]+)\s(\d+)/(\d+)#", $content, $matches)) {
+				$load['runnable']  = (float)$matches[4];
+				$load['scheduled'] = (float)$matches[5];
 			}
 		}
 
-		if (empty($content) || !preg_match("#([.\d]+)\s([.\d]+)\s([.\d]+)\s(\d+)/(\d+)#", $content, $matches)) {
-			$load_arr = sys_getloadavg();
-			if (empty($load_arr)) {
-				return [];
-			}
-			return [
-				'average1'  => $load_arr[0],
-				'average5'  => $load_arr[1],
-				'average15' => $load_arr[2],
-				'runnable'  => 0,
-				'scheduled' => 0
-			];
-		}
-
-		return [
-			'average1'  => (float)$matches[1],
-			'average5'  => (float)$matches[2],
-			'average15' => (float)$matches[3],
-			'runnable'  => (float)$matches[4],
-			'scheduled' => (float)$matches[5]
-		];
+		return $load;
 	}
 
 	/**
@@ -491,7 +524,7 @@ class System
 	public static function externalRedirect($url, $code = 302)
 	{
 		if (empty(parse_url($url, PHP_URL_SCHEME))) {
-			Logger::warning('No fully qualified URL provided', ['url' => $url, 'callstack' => self::callstack(20)]);
+			Logger::warning('No fully qualified URL provided', ['url' => $url]);
 			DI::baseUrl()->redirect($url);
 		}
 
@@ -529,19 +562,18 @@ class System
 	 * Checks if a given directory is usable for the system
 	 *
 	 * @param      $directory
-	 * @param bool $check_writable
 	 *
 	 * @return boolean the directory is usable
 	 */
-	private static function isDirectoryUsable($directory, $check_writable = true)
+	private static function isDirectoryUsable(string $directory): bool
 	{
-		if ($directory == '') {
+		if (empty($directory)) {
 			Logger::warning('Directory is empty. This shouldn\'t happen.');
 			return false;
 		}
 
 		if (!file_exists($directory)) {
-			Logger::warning('Path does not exist', ['directory' => $directory, 'user' => static::getUser()]);
+			Logger::info('Path does not exist', ['directory' => $directory, 'user' => static::getUser()]);
 			return false;
 		}
 
@@ -555,7 +587,7 @@ class System
 			return false;
 		}
 
-		if ($check_writable && !is_writable($directory)) {
+		if (!is_writable($directory)) {
 			Logger::warning('Path is not writable', ['directory' => $directory, 'user' => static::getUser()]);
 			return false;
 		}
@@ -604,10 +636,10 @@ class System
 			$temppath = BasePath::getRealPath($temppath);
 
 			// To avoid any interferences with other systems we create our own directory
-			$new_temppath = $temppath . "/" . DI::baseUrl()->getHostname();
+			$new_temppath = $temppath . "/" . DI::baseUrl()->getHost();
 			if (!is_dir($new_temppath)) {
 				/// @TODO There is a mkdir()+chmod() upwards, maybe generalize this (+ configurable) into a function/method?
-				mkdir($new_temppath);
+				@mkdir($new_temppath);
 			}
 
 			if (self::isDirectoryUsable($new_temppath)) {
@@ -665,23 +697,26 @@ class System
 
 	/**
 	 * Fetch the system rules
+	 * @param bool $numeric_id If set to "true", the rules are returned with a numeric id as key.
 	 *
 	 * @return array
 	 */
-	public static function getRules(): array
+	public static function getRules(bool $numeric_id = false): array
 	{
 		$rules = [];
 		$id    = 0;
 
 		if (DI::config()->get('system', 'tosdisplay')) {
 			$rulelist = DI::config()->get('system', 'tosrules') ?: DI::config()->get('system', 'tostext');
-			$html = BBCode::convert($rulelist, false, BBCode::EXTERNAL);
-
-			$msg = HTML::toPlaintext($html, 0, true);
+			$msg = BBCode::toPlaintext($rulelist, false);
 			foreach (explode("\n", trim($msg)) as $line) {
 				$line = trim($line);
 				if ($line) {
-					$rules[] = ['id' => (string)++$id, 'text' => $line];
+					if ($numeric_id) {
+						$rules[++$id] = $line;
+					} else {
+						$rules[] = ['id' => (string)++$id, 'text' => $line];
+					}
 				}
 			}
 		}

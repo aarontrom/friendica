@@ -6,7 +6,7 @@ I concentrated on 3 topics:
 
 1. A Modern, mobile friendly UI with bootstrap and awesome font
 2. Try to get a new UX for friendica (e.g. use modals where it seems to be useful)
-3. Give the user a powerfull (but easy) possebillities for custimation to personalize the theme and give it a own note.
+3. Give the user a powerfull (but easy) possibilities for customization to personalize the theme and give it a own note.
 
 **Installation Requirements:**
 * modern Browser with JS enabled (Chrome/Chromium is recommended)
@@ -20,7 +20,7 @@ This theme should be the start of a discussion in the friendica community (users
 What frameworks do we want to use? How should default friendica look like? And how do we want to use friendica? What do we need in the core code (At the present time some stuff this is done with ugly javascript hacks and own php code)?
 
 Coding a theme is much work but you will get a really good insight of the limitations of friendica and can start a discussion about doing things differently.
-So join the discussion at the friendica forums ;-)
+So join the discussion at the friendica groups ;-)
 
 If anyone wants to contribute to this theme he/she is welcome to do this.
 

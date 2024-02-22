@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -44,7 +44,7 @@ class FollowRequests extends BaseApi
 	 */
 	protected function post(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_FOLLOW);
+		$this->checkAllowedScope(self::SCOPE_FOLLOW);
 		$uid = self::getCurrentUserID();
 
 		$cdata = Contact::getPublicAndUserContactID($this->parameters['id'], $uid);
@@ -79,7 +79,7 @@ class FollowRequests extends BaseApi
 				throw new HTTPException\BadRequestException('Unexpected action parameter, expecting "authorize", "ignore" or "reject"');
 		}
 
-		System::jsonExit($relationship);
+		$this->jsonExit($relationship);
 	}
 
 	/**
@@ -89,7 +89,7 @@ class FollowRequests extends BaseApi
 	 */
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = self::getCurrentUserID();
 
 		$request = $this->getRequest([
@@ -105,14 +105,16 @@ class FollowRequests extends BaseApi
 		foreach ($introductions as $key => $introduction) {
 			try {
 				self::setBoundaries($introduction->id);
-				$return[] = DI::mstdnFollowRequest()->createFromIntroduction($introduction);
-			} catch (HTTPException\InternalServerErrorException $exception) {
+				$return[] = DI::mstdnAccount()->createFromContactId($introduction->cid, $introduction->uid);
+			} catch (HTTPException\InternalServerErrorException
+				| HTTPException\NotFoundException
+				| \ImagickException $exception) {
 				DI::intro()->delete($introduction);
 				unset($introductions[$key]);
 			}
 		}
 
 		self::setLinkHeader();
-		System::jsonExit($return);
+		$this->jsonExit($return);
 	}
 }

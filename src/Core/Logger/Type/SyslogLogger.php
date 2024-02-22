@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,9 +21,9 @@
 
 namespace Friendica\Core\Logger\Type;
 
+use Friendica\Core\Logger\Capability\IHaveCallIntrospections;
 use Friendica\Core\Logger\Exception\LoggerException;
 use Friendica\Core\Logger\Exception\LogLevelException;
-use Friendica\Core\Logger\Util\Introspection;
 use Psr\Log\LogLevel;
 
 /**
@@ -32,6 +32,8 @@ use Psr\Log\LogLevel;
  */
 class SyslogLogger extends AbstractLogger
 {
+	const NAME = 'syslog';
+
 	const IDENT = 'Friendica';
 
 	/** @var int The default syslog flags */
@@ -43,7 +45,7 @@ class SyslogLogger extends AbstractLogger
 	 * Translates LogLevel log levels to syslog log priorities.
 	 * @var array
 	 */
-	private $logLevels = [
+	public const logLevels = [
 		LogLevel::DEBUG     => LOG_DEBUG,
 		LogLevel::INFO      => LOG_INFO,
 		LogLevel::NOTICE    => LOG_NOTICE,
@@ -58,7 +60,7 @@ class SyslogLogger extends AbstractLogger
 	 * Translates log priorities to string outputs
 	 * @var array
 	 */
-	private $logToString = [
+	protected const logToString = [
 		LOG_DEBUG   => 'DEBUG',
 		LOG_INFO    => 'INFO',
 		LOG_NOTICE  => 'NOTICE',
@@ -99,20 +101,18 @@ class SyslogLogger extends AbstractLogger
 
 	/**
 	 * {@inheritdoc}
-	 * @param string $level       The minimum loglevel at which this logger will be triggered
-	 * @param int    $logOpts     Indicates what logging options will be used when generating a log message
-	 * @param int    $logFacility Used to specify what type of program is logging the message
 	 *
-	 * @throws LogLevelException
-	 * @throws LoggerException
+	 * @param string $logLevel    The minimum loglevel at which this logger will be triggered
+	 * @param string $logOptions
+	 * @param string $logFacility
 	 */
-	public function __construct($channel, Introspection $introspection, string $level = LogLevel::NOTICE, int $logOpts = self::DEFAULT_FLAGS, int $logFacility = self::DEFAULT_FACILITY )
+	public function __construct(string $channel, IHaveCallIntrospections $introspection, string $logLevel, string $logOptions, string $logFacility)
 	{
 		parent::__construct($channel, $introspection);
-		$this->logOpts     = $logOpts;
+
+		$this->logOpts     = $logOptions;
 		$this->logFacility = $logFacility;
-		$this->logLevel    = $this->mapLevelToPriority($level);
-		$this->introspection->addClasses([self::class]);
+		$this->logLevel    = $logLevel;
 	}
 
 	/**
@@ -148,11 +148,11 @@ class SyslogLogger extends AbstractLogger
 	 */
 	public function mapLevelToPriority(string $level): int
 	{
-		if (!array_key_exists($level, $this->logLevels)) {
+		if (!array_key_exists($level, static::logLevels)) {
 			throw new LogLevelException(sprintf('The level "%s" is not valid.', $level));
 		}
 
-		return $this->logLevels[$level];
+		return static::logLevels[$level];
 	}
 
 	/**
@@ -201,7 +201,7 @@ class SyslogLogger extends AbstractLogger
 		$record = array_merge($record, ['uid' => $this->logUid]);
 
 		$logMessage = $this->channel . ' ';
-		$logMessage .= '[' . $this->logToString[$level] . ']: ';
+		$logMessage .= '[' . static::logToString[$level] . ']: ';
 		$logMessage .= $this->psrInterpolate($message, $context) . ' ';
 		$logMessage .= $this->jsonEncodeArray($context) . ' - ';
 		$logMessage .= $this->jsonEncodeArray($record);

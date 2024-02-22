@@ -27,7 +27,7 @@ Der Quellcode von Friendica Red ist [hier](https://github.com/friendica/red) zu 
 
 Addons findest Du auf [dieser Seite](https://github.com/friendica/friendica-addons).
 
-Wenn Du neue Themen suchst, findest Du sie auf [Friendica-Themes.com](http://friendica-themes.com/).
+Wenn Du neue Themen suchst, findest Du sie auf [github.com/bkil/friendica-themes](https://github.com/bkil/friendica-themes).
 
 <a name="adminaccount1"></a>
 ### Ich habe meine E-Mail Adresse geändern und jetzt ist das Admin Panel verschwunden?
@@ -39,9 +39,13 @@ Bitte aktualisiere deine E-Mail Adresse in der <tt>config/local.config.php</tt> 
 
 Ja.
 Du kannst in der <tt>config/local.config.php</tt> Datei mehrere E-Mail Adressen auflisten.
-Die aufgelisteten Adressen werden mit Kommata von einander getrennt.
+Die aufgelisteten Adressen werden wie folgt durch Kommas voneinander getrennt:
 
-<a name="dbupdate">
+```php
+'admin_email' => 'mail1@example.com,mail2@example.com',
+```
+
+<a name="dbupdate"></a>
 ### Die Datenbank Struktur schein nicht aktuell zu sein. Was kann ich tun?
 
 Rufe bitte im Admin Panel den Punkt [DB Updates](/admin/dbsync/) auf und folge dem Link *Datenbank Struktur überprüfen*.
@@ -52,4 +56,4 @@ Starte dazu bitte vom Grundverzeichnis deiner Friendica Instanz folgendes Komman
 
     bin/console dbstructure update
 
-sollten bei der Ausführung Fehler auftreten, kontaktiere bitte das [Support Forum](https://forum.friendi.ca/profile/helpers).
+sollten bei der Ausführung Fehler auftreten, kontaktiere bitte die [Friendia Support](https://forum.friendi.ca/profile/helpers)  Gruppe oder die [Friendica Admins](https://forum.friendi.ca/profile/admins) Gruppe.

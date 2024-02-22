@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,12 +21,10 @@
 
 namespace Friendica\Core\Logger\Type;
 
-use Friendica\Core\Logger\Exception\LoggerArgumentException;
+use Friendica\Core\Logger\Capability\IHaveCallIntrospections;
 use Friendica\Core\Logger\Exception\LoggerException;
 use Friendica\Core\Logger\Exception\LogLevelException;
 use Friendica\Util\DateTimeFormat;
-use Friendica\Util\FileSystem;
-use Friendica\Core\Logger\Util\Introspection;
 use Psr\Log\LogLevel;
 
 /**
@@ -34,17 +32,13 @@ use Psr\Log\LogLevel;
  */
 class StreamLogger extends AbstractLogger
 {
+	const NAME = 'stream';
+
 	/**
 	 * The minimum loglevel at which this logger will be triggered
 	 * @var string
 	 */
 	private $logLevel;
-
-	/**
-	 * The file URL of the stream (if needed)
-	 * @var string
-	 */
-	private $url;
 
 	/**
 	 * The stream, where the current logger is writing into
@@ -59,15 +53,10 @@ class StreamLogger extends AbstractLogger
 	private $pid;
 
 	/**
-	 * @var FileSystem
-	 */
-	private $fileSystem;
-
-	/**
 	 * Translates LogLevel log levels to integer values
 	 * @var array
 	 */
-	private $levelToInt = [
+	public const levelToInt = [
 		LogLevel::EMERGENCY => 0,
 		LogLevel::ALERT     => 1,
 		LogLevel::CRITICAL  => 2,
@@ -80,39 +69,22 @@ class StreamLogger extends AbstractLogger
 
 	/**
 	 * {@inheritdoc}
-	 * @param string|resource $stream The stream to write with this logger (either a file or a stream, i.e. stdout)
 	 * @param string          $level  The minimum loglevel at which this logger will be triggered
 	 *
-	 * @throws LoggerArgumentException
-	 * @throws LogLevelException
+	 * @throws LoggerException
 	 */
-	public function __construct($channel, $stream, Introspection $introspection, FileSystem $fileSystem, string $level = LogLevel::DEBUG)
+	public function __construct(string $channel, IHaveCallIntrospections $introspection, $stream, int $logLevel, int $pid)
 	{
-		$this->fileSystem = $fileSystem;
-
 		parent::__construct($channel, $introspection);
 
-		if (is_resource($stream)) {
-			$this->stream = $stream;
-		} elseif (is_string($stream)) {
-			$this->url = $stream;
-		} else {
-			throw new LoggerArgumentException('A stream must either be a resource or a string.');
-		}
-
-		$this->pid = getmypid();
-		if (array_key_exists($level, $this->levelToInt)) {
-			$this->logLevel = $this->levelToInt[$level];
-		} else {
-			throw new LogLevelException(sprintf('The level "%s" is not valid.', $level));
-		}
-
-		$this->checkStream();
+		$this->stream   = $stream;
+		$this->pid      = $pid;
+		$this->logLevel = $logLevel;
 	}
 
 	public function close()
 	{
-		if ($this->url && is_resource($this->stream)) {
+		if (is_resource($this->stream)) {
 			fclose($this->stream);
 		}
 
@@ -133,17 +105,15 @@ class StreamLogger extends AbstractLogger
 	 */
 	protected function addEntry($level, string $message, array $context = [])
 	{
-		if (!array_key_exists($level, $this->levelToInt)) {
+		if (!array_key_exists($level, static::levelToInt)) {
 			throw new LogLevelException(sprintf('The level "%s" is not valid.', $level));
 		}
 
-		$logLevel = $this->levelToInt[$level];
+		$logLevel = static::levelToInt[$level];
 
 		if ($logLevel > $this->logLevel) {
 			return;
 		}
-
-		$this->checkStream();
 
 		$formattedLog = $this->formatLog($level, $message, $context);
 		fwrite($this->stream, $formattedLog);
@@ -178,28 +148,5 @@ class StreamLogger extends AbstractLogger
 		$logMessage .= PHP_EOL;
 
 		return $logMessage;
-	}
-
-	/**
-	 * Checks the current stream
-	 *
-	 * @throws LoggerException
-	 * @throws LoggerArgumentException
-	 */
-	private function checkStream()
-	{
-		if (is_resource($this->stream)) {
-			return;
-		}
-
-		if (empty($this->url)) {
-			throw new LoggerArgumentException('Missing stream URL.');
-		}
-
-		try {
-			$this->stream = $this->fileSystem->createStream($this->url);
-		} catch (\UnexpectedValueException $exception) {
-			throw new LoggerException('Cannot create stream.', $exception);
-		}
 	}
 }

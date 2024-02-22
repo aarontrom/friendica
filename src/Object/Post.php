@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -31,16 +31,15 @@ use Friendica\Core\Renderer;
 use Friendica\DI;
 use Friendica\Model\Contact;
 use Friendica\Model\Item;
-use Friendica\Model\Photo;
 use Friendica\Model\Post as PostModel;
 use Friendica\Model\Tag;
 use Friendica\Model\User;
 use Friendica\Protocol\Activity;
 use Friendica\Util\Crypto;
 use Friendica\Util\DateTimeFormat;
-use Friendica\Util\Proxy;
 use Friendica\Util\Strings;
 use Friendica\Util\Temporal;
+use GuzzleHttp\Psr7\Uri;
 use InvalidArgumentException;
 
 /**
@@ -91,9 +90,13 @@ class Post
 		}
 
 		$this->writable = $this->getDataValue('writable') || $this->getDataValue('self');
-		$author = ['uid' => 0, 'id' => $this->getDataValue('author-id'),
+		$author = [
+			'uid'     => 0,
+			'id'      => $this->getDataValue('author-id'),
 			'network' => $this->getDataValue('author-network'),
-			'url' => $this->getDataValue('author-link')];
+			'url'     => $this->getDataValue('author-link'),
+			'alias'   => $this->getDataValue('author-alias')
+		];
 		$this->redirect_url = Contact::magicLinkByContact($author);
 		if (!$this->isToplevel()) {
 			$this->threaded = true;
@@ -153,15 +156,16 @@ class Post
 	/**
 	 * Get data in a form usable by a conversation template
 	 *
-	 * @param array   $conv_responses conversation responses
-	 * @param string $formSecurityToken A security Token to avoid CSF attacks
-	 * @param integer $thread_level   default = 1
+	 * @param array   $conv_responses    conversation responses
+	 * @param string  $formSecurityToken A security Token to avoid CSF attacks
+	 * @param integer $thread_level      default = 1
+	 * @param array   $thread_parent     Array of parent guid and parent author names
 	 *
 	 * @return mixed The data requested on success, false on failure
 	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
 	 * @throws \ImagickException
 	 */
-	public function getTemplateData(array $conv_responses, string $formSecurityToken, int $thread_level = 1)
+	public function getTemplateData(array $conv_responses, string $formSecurityToken, int $thread_level = 1, array $thread_parent = [])
 	{
 		$item = $this->getData();
 		$edited = false;
@@ -191,7 +195,7 @@ class Post
 		$pinned = '';
 		$pin = false;
 		$star = false;
-		$ignore = false;
+		$ignore_thread = false;
 		$ispinned = 'unpinned';
 		$isstarred = 'unstarred';
 		$indent = '';
@@ -205,8 +209,9 @@ class Post
 		$lock      = ($item['private'] == Item::PRIVATE) ? $privacy : false;
 		$connector = !in_array($item['network'], Protocol::NATIVE_SUPPORT) ? DI::l10n()->t('Connector Message') : false;
 
-		$shareable = in_array($conv->getProfileOwner(), [0, DI::userSession()->getLocalUserId()]) && $item['private'] != Item::PRIVATE;
-		$announceable = $shareable && in_array($item['network'], [Protocol::ACTIVITYPUB, Protocol::DFRN, Protocol::DIASPORA, Protocol::TWITTER]);
+		$shareable    = in_array($conv->getProfileOwner(), [0, DI::userSession()->getLocalUserId()]) && $item['private'] != Item::PRIVATE;
+		$announceable = $shareable && in_array($item['network'], [Protocol::ACTIVITYPUB, Protocol::DFRN, Protocol::DIASPORA, Protocol::TWITTER, Protocol::TUMBLR, Protocol::BLUESKY]);
+		$commentable  = ($item['network'] != Protocol::TUMBLR);
 
 		// On Diaspora only toplevel posts can be reshared
 		if ($announceable && ($item['network'] == Protocol::DIASPORA) && ($item['gravity'] != Item::GRAVITY_PARENT)) {
@@ -243,26 +248,47 @@ class Post
 			$pinned = DI::l10n()->t('Pinned item');
 		}
 
-		// Showing the one or the other text, depending upon if we can only hide it or really delete it.
-		$delete = $origin ? DI::l10n()->t('Delete globally') : DI::l10n()->t('Remove locally');
-
-		$drop = false;
-		$block = false;
+		$drop         = false;
+		$block        = false;
+		$ignore       = false;
+		$collapse     = false;
+		$report       = false;
+		$ignoreServer = false;
 		if (DI::userSession()->getLocalUserId()) {
 			$drop = [
 				'dropping' => $dropping,
 				'pagedrop' => $item['pagedrop'],
 				'select' => DI::l10n()->t('Select'),
-				'delete' => $delete,
+				'label' => $origin ? DI::l10n()->t('Delete globally') : DI::l10n()->t('Remove locally'),
 			];
 		}
 
 		if (!$item['self'] && DI::userSession()->getLocalUserId()) {
 			$block = [
-				'blocking' => true,
-				'block'   => DI::l10n()->t('Block %s', $item['author-name']),
-				'author_id'   => $item['author-id'],
+				'blocking'  => true,
+				'label'     => DI::l10n()->t('Block %s', $item['author-name']),
+				'author_id' => $item['author-id'],
 			];
+			$ignore = [
+				'ignoring'  => true,
+				'label'     => DI::l10n()->t('Ignore %s', $item['author-name']),
+				'author_id' => $item['author-id'],
+			];
+			$collapse = [
+				'collapsing' => true,
+				'label'      => DI::l10n()->t('Collapse %s', $item['author-name']),
+				'author_id'  => $item['author-id'],
+			];
+			$report = [
+				'label' => DI::l10n()->t('Report post'),
+				'href'  => 'moderation/report/create?' . http_build_query(['cid' => $item['author-id'], 'uri-ids' => [$item['uri-id']]]),
+			];
+			$authorBaseUri = new Uri($item['author-baseurl'] ?? '');
+			if ($authorBaseUri->getHost() && !DI::baseUrl()->isLocalUrl($authorBaseUri)) {
+				$ignoreServer = [
+					'label' => DI::l10n()->t("Ignore %s server", $authorBaseUri->getHost()),
+				];
+			}
 		}
 
 		$filer = DI::userSession()->getLocalUserId() ? DI::l10n()->t('Save to folder') : false;
@@ -273,8 +299,13 @@ class Post
 		}
 
 		if (DI::userSession()->isAuthenticated()) {
-			$author = ['uid' => 0, 'id' => $item['author-id'],
-				'network' => $item['author-network'], 'url' => $item['author-link']];
+			$author = [
+				'uid'     => 0,
+				'id'      => $item['author-id'],
+				'network' => $item['author-network'],
+				'url'     => $item['author-link'],
+				'alias'   => $item['author-alias'],
+			];
 			$profile_link = Contact::magicLinkByContact($author);
 		} else {
 			$profile_link = $item['author-link'];
@@ -289,7 +320,7 @@ class Post
 		$location_html = $locate['html'] ?: Strings::escapeHtml($locate['location'] ?: $locate['coord'] ?: '');
 
 		// process action responses - e.g. like/dislike/attend/agree/whatever
-		$response_verbs = ['like', 'dislike', 'announce'];
+		$response_verbs = ['like', 'dislike', 'announce', 'comment'];
 
 		$isevent = false;
 		$attend = [];
@@ -304,13 +335,30 @@ class Post
 			}
 		}
 
+		$emojis = $this->getEmojis($item);
+
+		$verbs = [
+			'like'        => Activity::LIKE,
+			'dislike'     => Activity::DISLIKE,
+			'announce'    => Activity::ANNOUNCE,
+			'comment'     => Activity::POST,
+			'attendyes'   => Activity::ATTEND,
+			'attendno'    => Activity::ATTENDNO,
+			'attendmaybe' => Activity::ATTENDMAYBE,
+		];
+		$reactions = $emojis;
 		$responses = [];
 		foreach ($response_verbs as $value => $verb) {
 			$responses[$verb] = [
 				'self'   => $conv_responses[$verb][$item['uri-id']]['self'] ?? 0,
-				'output' => !empty($conv_responses[$verb][$item['uri-id']]) ? DI::conversation()->formatActivity($conv_responses[$verb][$item['uri-id']]['links'], $verb, $item['uri-id']) : '',
+				'output' => !empty($conv_responses[$verb][$item['uri-id']]) ? DI::conversation()->formatActivity($conv_responses[$verb][$item['uri-id']]['links'], $verb, $item['uri-id'], $verbs[$verb], $emojis) : '',
+				'total'  => $emojis[$verbs[$verb]]['total'] ?? '',
+				'title'  => $emojis[$verbs[$verb]]['title'] ?? '',
 			];
+			unset($reactions[$verbs[$verb]]);
 		}
+
+		unset($emojis[Activity::POST]);
 
 		/*
 		 * We should avoid doing this all the time, but it depends on the conversation mode
@@ -327,14 +375,14 @@ class Post
 
 		if ($this->isToplevel()) {
 			if (DI::userSession()->getLocalUserId()) {
-				$ignored = PostModel\ThreadUser::getIgnored($item['uri-id'], DI::userSession()->getLocalUserId());
-				if ($item['mention'] || $ignored) {
-					$ignore = [
+				$ignored_thread = PostModel\ThreadUser::getIgnored($item['uri-id'], DI::userSession()->getLocalUserId());
+				if ($item['mention'] || $ignored_thread) {
+					$ignore_thread = [
 						'do'        => DI::l10n()->t('Ignore thread'),
 						'undo'      => DI::l10n()->t('Unignore thread'),
 						'toggle'    => DI::l10n()->t('Toggle ignore status'),
-						'classdo'   => $ignored ? 'hidden' : '',
-						'classundo' => $ignored ? '' : 'hidden',
+						'classdo'   => $ignored_thread ? 'hidden' : '',
+						'classundo' => $ignored_thread ? '' : 'hidden',
 						'ignored'   => DI::l10n()->t('Ignored'),
 					];
 				}
@@ -375,7 +423,7 @@ class Post
 		}
 
 		if ($conv->isWritable()) {
-			$buttons['like']    = [DI::l10n()->t("I like this \x28toggle\x29")      , DI::l10n()->t('Like')];
+			$buttons['like']    = [DI::l10n()->t("I like this \x28toggle\x29"), DI::l10n()->t('Like')];
 			$buttons['dislike'] = [DI::l10n()->t("I don't like this \x28toggle\x29"), DI::l10n()->t('Dislike')];
 			if ($shareable) {
 				$buttons['share'] = [DI::l10n()->t('Quote share this'), DI::l10n()->t('Quote Share')];
@@ -386,7 +434,11 @@ class Post
 			}
 		}
 
-		$comment_html = $this->getCommentBox($indent);
+		if ($commentable) {
+			$comment_html = $this->getCommentBox($indent);
+		} else {
+			$comment_html = '';
+		}
 
 		if (strcmp(DateTimeFormat::utc($item['created']), DateTimeFormat::utc('now - 12 hours')) > 0) {
 			$shiny = 'shiny';
@@ -406,7 +458,8 @@ class Post
 			$title = '';
 		}
 
-		if (DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'hide_dislike')) {
+		$hide_dislike = DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'hide_dislike');
+		if ($hide_dislike) {
 			$buttons['dislike'] = false;
 		}
 
@@ -434,8 +487,10 @@ class Post
 
 		// Fetching of Diaspora posts doesn't always work. There are issues with reshares and possibly comments
 		if (!DI::userSession()->getLocalUserId() && ($item['network'] != Protocol::DIASPORA) && !empty(DI::session()->get('remote_comment'))) {
-			$remote_comment = [DI::l10n()->t('Comment this item on your system'), DI::l10n()->t('Remote comment'),
-				str_replace('{uri}', urlencode($item['uri']), DI::session()->get('remote_comment'))];
+			$remote_comment = [
+				DI::l10n()->t('Comment this item on your system'), DI::l10n()->t('Remote comment'),
+				str_replace('{uri}', urlencode($item['uri']), DI::session()->get('remote_comment'))
+			];
 
 			// Ensure to either display the remote comment or the local activities
 			$buttons = [];
@@ -460,7 +515,15 @@ class Post
 			$browsershare = null;
 		}
 
+		$parent_guid     = $thread_parent[$item['thr-parent-id']]['guid'] ?? '';
+		$parent_username = $thread_parent[$item['thr-parent-id']]['name'] ?? '';
+		$parent_unknown  = $parent_username ? '' : DI::l10n()->t('Unknown parent');
+
 		$tmp_item = [
+			'parentguid'      => $parent_guid,
+			'inreplyto'       => DI::l10n()->t('in reply to %s', $parent_username),
+			'isunknown'       => $parent_unknown,
+			'isunknown_label' => DI::l10n()->t('Parent is probably private or not federated.'),
 			'template'        => $this->getTemplate(),
 			'type'            => implode('', array_slice(explode('/', $item['verb']), -1)),
 			'comment_firstcollapsed' => false,
@@ -518,16 +581,25 @@ class Post
 			'pinned'          => $pinned,
 			'isstarred'       => $isstarred,
 			'star'            => $star,
-			'ignore'          => $ignore,
+			'ignore'          => $ignore_thread,
 			'tagger'          => $tagger,
 			'filer'           => $filer,
 			'language'        => $languages,
 			'drop'            => $drop,
 			'block'           => $block,
+			'ignore_author'   => $ignore,
+			'collapse'        => $collapse,
+			'report'          => $report,
+			'ignore_server'   => $ignoreServer,
 			'vote'            => $buttons,
 			'like_html'       => $responses['like']['output'],
 			'dislike_html'    => $responses['dislike']['output'],
+			'hide_dislike'    => $hide_dislike,
+			'emojis'          => $emojis,
+			'quoteshares'     => $this->getQuoteShares($item['quoteshares']),
+			'reactions'       => $reactions,
 			'responses'       => $responses,
+			'legacy_activities' => DI::config()->get('system', 'legacy_activities'),
 			'switchcomment'   => DI::l10n()->t('Comment'),
 			'reply_label'     => DI::l10n()->t('Reply to %s', $profile_name),
 			'comment_html'    => $comment_html,
@@ -537,6 +609,7 @@ class Post
 			'wait'            => DI::l10n()->t('Please wait'),
 			'thread_level'    => $thread_level,
 			'edited'          => $edited,
+			'author_gsid'     => $item['author-gsid'],
 			'network'         => $item['network'],
 			'network_name'    => ContactSelector::networkToName($item['author-network'], $item['author-link'], $item['network'], $item['author-gsid']),
 			'network_icon'    => ContactSelector::networkToIcon($item['network'], $item['author-link'], $item['author-gsid']),
@@ -567,8 +640,10 @@ class Post
 		$children = $this->getChildren();
 		$nb_children = count($children);
 		if ($nb_children > 0) {
+			$thread_parent[$item['uri-id']] = ['guid' => $item['guid'], 'name' => $item['author-name']];
 			foreach ($children as $child) {
-				$result['children'][] = $child->getTemplateData($conv_responses, $formSecurityToken, $thread_level + 1);
+				$thread_parent[$child->getDataValue('uri-id')] = ['guid' => $child->getDataValue('guid'), 'name' => $child->getDataValue('author-name')];
+				$result['children'][] = $child->getTemplateData($conv_responses, $formSecurityToken, $thread_level + 1, $thread_parent);
 			}
 
 			// Collapse
@@ -593,6 +668,90 @@ class Post
 		$result['threaded']           = $this->isThreaded();
 
 		return $result;
+	}
+
+	/**
+	 * Fetch emojis
+	 *
+	 * @param array $item
+	 * @return array
+	 */
+	private function getEmojis(array $item): array
+	{
+		if (empty($item['emojis'])) {
+			return [];
+		}
+
+		$emojis = [];
+		foreach ($item['emojis'] as $index => $element) {
+			$key    = $element['verb'];
+			$actors = implode(', ', $element['title']);
+			switch ($element['verb']) {
+				case Activity::ANNOUNCE:
+					$title = DI::l10n()->t('Reshared by: %s', $actors);
+					$icon  = ['fa' => 'fa-retweet', 'icon' => 'icon-retweet'];
+					break;
+
+				case Activity::VIEW:
+					$title = DI::l10n()->t('Viewed by: %s', $actors);
+					$icon  = ['fa' => 'fa-eye', 'icon' => 'icon-eye-open'];
+					break;
+
+				case Activity::LIKE:
+					$title = DI::l10n()->t('Liked by: %s', $actors);
+					$icon  = ['fa' => 'fa-thumbs-up', 'icon' => 'icon-thumbs-up'];
+					break;
+
+				case Activity::DISLIKE:
+					$title = DI::l10n()->t('Disliked by: %s', $actors);
+					$icon  = ['fa' => 'fa-thumbs-down', 'icon' => 'icon-thumbs-down'];
+					break;
+
+				case Activity::ATTEND:
+					$title = DI::l10n()->t('Attended by: %s', $actors);
+					$icon  = ['fa' => 'fa-check', 'icon' => 'icon-ok'];
+					break;
+
+				case Activity::ATTENDMAYBE:
+					$title = DI::l10n()->t('Maybe attended by: %s', $actors);
+					$icon  = ['fa' => 'fa-question', 'icon' => 'icon-question'];
+					break;
+
+				case Activity::ATTENDNO:
+					$title = DI::l10n()->t('Not attended by: %s', $actors);
+					$icon  = ['fa' => 'fa-times', 'icon' => 'icon-remove'];
+					break;
+
+				case Activity::POST:
+					$title = DI::l10n()->t('Commented by: %s', $actors);
+					$icon  = ['fa' => 'fa-commenting', 'icon' => 'icon-commenting'];
+					break;
+	
+				default:
+					$title = DI::l10n()->t('Reacted with %s by: %s', $element['emoji'], $actors);
+					$icon  = [];
+					$key   = $element['emoji'];
+					break;
+			}
+			$emojis[$key] = ['emoji' => $element['emoji'], 'total' => $element['total'], 'title' => $title, 'icon' => $icon];
+		}
+
+		return $emojis;
+	}
+
+	/**
+	 * Fetch quote shares
+	 *
+	 * @param array $quoteshares
+	 * @return array
+	 */
+	private function getQuoteShares($quoteshares)
+	{
+		if (empty($quoteshares)) {
+			return [];
+		}
+
+		return ['total' => $quoteshares['total'], 'title' => DI::l10n()->t('Quote shared by: %s', implode(', ', $quoteshares['title']))];
 	}
 
 	/**
@@ -635,8 +794,10 @@ class Post
 		if ($item->getDataValue('network') === Protocol::MAIL && DI::userSession()->getLocalUserId() != $item->getDataValue('uid')) {
 			Logger::warning('Post object does not belong to local user', ['post' => $item, 'local_user' => DI::userSession()->getLocalUserId()]);
 			return false;
-		} elseif (DI::activity()->match($item->getDataValue('verb'), Activity::LIKE) ||
-		          DI::activity()->match($item->getDataValue('verb'), Activity::DISLIKE)) {
+		} elseif (
+			DI::activity()->match($item->getDataValue('verb'), Activity::LIKE) ||
+			DI::activity()->match($item->getDataValue('verb'), Activity::DISLIKE)
+		) {
 			Logger::warning('Post objects is a like/dislike', ['post' => $item]);
 			return false;
 		}
@@ -841,7 +1002,7 @@ class Post
 
 		if ($conv) {
 			// This will allow us to comment on wall-to-wall items owned by our friends
-			// and community forums even if somebody else wrote the post.
+			// and community groups even if somebody else wrote the post.
 			// bug #517 - this fixes for conversation owner
 			if ($conv->getMode() == 'profile' && $conv->getProfileOwner() == DI::userSession()->getLocalUserId()) {
 				return true;
@@ -920,8 +1081,10 @@ class Post
 			}
 
 			$profile = Contact::getByURL($term['url'], false, ['addr', 'contact-type']);
-			if (!empty($profile['addr']) && (($profile['contact-type'] ?? Contact::TYPE_UNKNOWN) != Contact::TYPE_COMMUNITY) &&
-				($profile['addr'] != $owner['addr']) && !strstr($text, $profile['addr'])) {
+			if (
+				!empty($profile['addr']) && (($profile['contact-type'] ?? Contact::TYPE_UNKNOWN) != Contact::TYPE_COMMUNITY) &&
+				($profile['addr'] != $owner['addr']) && !strstr($text, $profile['addr'])
+			) {
 				$text .= '@' . $profile['addr'] . ' ';
 			}
 		}
@@ -988,7 +1151,9 @@ class Post
 				'$edbold'      => DI::l10n()->t('Bold'),
 				'$editalic'    => DI::l10n()->t('Italic'),
 				'$eduline'     => DI::l10n()->t('Underline'),
+				'$contentwarn' => DI::l10n()->t('Content Warning'),
 				'$edquote'     => DI::l10n()->t('Quote'),
+				'$edemojis'    => DI::l10n()->t('Add emojis'),
 				'$edcode'      => DI::l10n()->t('Code'),
 				'$edimg'       => DI::l10n()->t('Image'),
 				'$edurl'       => DI::l10n()->t('Link'),
@@ -1048,6 +1213,7 @@ class Post
 							'id'      => $this->getDataValue('owner-id'),
 							'network' => $this->getDataValue('owner-network'),
 							'url'     => $this->getDataValue('owner-link'),
+							'alias'   => $this->getDataValue('owner-alias'),
 						];
 						$this->owner_url = Contact::magicLinkByContact($owner);
 					}

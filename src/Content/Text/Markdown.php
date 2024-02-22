@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,7 +22,6 @@
 namespace Friendica\Content\Text;
 
 use Friendica\Core\Logger;
-use Friendica\Core\System;
 use Friendica\DI;
 use Friendica\Model\Contact;
 
@@ -112,7 +111,7 @@ class Markdown
 	{
 		// @TODO Temporary until we find the source of the null value to finally set the correct type-hint
 		if (is_null($s)) {
-			Logger::warning('Received null value', ['callstack' => System::callstack()]);
+			Logger::warning('Received null value');
 			return '';
 		}
 
@@ -144,9 +143,6 @@ class Markdown
 
 		// remove duplicate adjacent code tags
 		$s = preg_replace('/(\[code\])+(.*?)(\[\/code\])+/ism', '[code]$2[/code]', $s);
-
-		// Don't show link to full picture (until it is fixed)
-		$s = BBCode::scaleExternalImages($s);
 
 		DI::profiler()->stopRecording();
 		return $s;

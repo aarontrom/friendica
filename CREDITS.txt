@@ -31,6 +31,7 @@ Angristan
 Anthronaut
 Anton
 Antron Samurai
+Anubis2814
 Arian - Cazare Muncitori
 Asher Pen
 atjn
@@ -51,6 +52,7 @@ BinkaDroid
 Bjoessi
 bkil
 bob lebonche
+Boluwatife Victor
 Boris Daniel Martinez Millàn
 bufalo1973
 ButterflyOfFire
@@ -69,13 +71,16 @@ Christian Wiwie
 Cohan Robinson
 Colby Sollars
 Copiis
-Copiis Praeesse
 CrystalStiletto
+csolisr
 Cyboulette
 Cyryl Sochacki
 czarnystokrotek
+daingewuvzeevisiddfddd
+Damian Wajer
 Damien Goutte-Gattat
 Daniel Dupriest
+Daniel Siepmann
 Daria Początek
 David
 David Martín Miranda
@@ -95,19 +100,23 @@ Eelco Maljaars
 effex7
 Elena
 emilia.krawczyk
+Entropy Engineer
 Eric Côté
 Erich
 erik
 Erkan Yilmaz
 Eugene Veresk
 Extarys
+F1per 3y
 Fabian Dost
 Fabio Comuni
 Farida Khalaf
+Faris
 felixgilles
 Filip Bugaj
 Filip H.F. "FiXato" Slagter
 Finn Dean
+Florent C.
 FlxAlbroscheit
 foss-
 Francesco Apruzzese
@@ -117,18 +126,22 @@ Gerhard Seeber
 gerhard6380
 Gert Cauwenberg
 Gidi Kroon
+git-marijus
 GLComo
 greeneyedred
 Gregory Smith
 Grischa Brockhaus
+groen
 gudzpoz
 GunChleoc
 guzzisti
 Haakon Meland Eriksen
 Hank Grabowski
+Hannes Heute
 Hans Meine
 Hauke
 Hauke Altmann
+Henrik Härkönen
 Herbert Thielen
 hlad
 hoergen
@@ -138,7 +151,7 @@ Ilmari
 ImgBotApp
 irhen
 Jakob
-Jakobus Schürz (admin)
+Jakob Schürz
 Jens Tautenhahn
 jensp
 Jeroen De Meerleer
@@ -151,8 +164,10 @@ Johannes Schwab
 John Brazil
 John Mortensen
 Jonatan Nyberg
+Jonathan Lamothe
 Jonny Tischbein
 Josef Moravek
+Josh Soref
 juanman
 julia.domagalska
 Julio Cova
@@ -162,11 +177,13 @@ Karolina
 Kastal András
 Keenan Pepper
 Keith Fernie
+keithhacks
 Klaus Weidenbach
 Koyu Berteon
 kPherox
 Kris
 Kristoffer Grundström
+ktlinux
 KulikAlex
 Lea1995polish
 Leberwurscht
@@ -185,6 +202,7 @@ Marcin Klessa
 Marcin Mikołajczak
 Marcus Müller
 Marek Bachmann
+MarekBenjamin
 Marie Olive
 Mariusz Pisz
 marmor
@@ -209,6 +227,7 @@ mytbk
 nathilia-peirce
 Nicola Spanti
 Nicolas Derive
+nnsrymni
 nobody
 nupplaPhil
 Olaf Conradi
@@ -227,6 +246,7 @@ Pavel Morozov
 PerigGouanvic
 peter
 Peter Liebetrau
+Petr Kučera
 peturisfeld
 Phigger Phigger
 Philipp
@@ -244,7 +264,8 @@ Rafael Kalachev
 Rain Hawk
 Rainulf Pineda
 Ralf Thees
-Ralph
+ralph van der honing
+Raroun
 Ratten
 rcmaniac
 RealKinetix
@@ -257,8 +278,10 @@ Rik 4
 RJ Madsen
 Roger Meyer
 Roland Häder
+Ruud Schilders
 rwa
 Ryan Voots
+S. Brusch
 S.Krumbholz
 Sakałoŭ Alaksiej
 Sam
@@ -304,6 +327,7 @@ TiMESPLiNTER
 Tino
 Tobias Diekershoff
 Tobias Hößl
+Tobias Quathamer
 Tom
 Tom Aurlund
 Tom Hu
@@ -314,6 +338,7 @@ Torbjörn Andersson
 TORminator
 trebor
 tschlotfeldt
+tslmuun
 Tubuntu
 Tupambae.org
 U-SOUND\mike
@@ -335,9 +360,11 @@ Waldemar Stoczkowski
 Walter Bulbazor
 Wanting Chen
 Wil Tur
+Wladimir Palant
 Wouter Broers
 Xiaofei Xu
 XMPPはいいぞ
+xundeenergie
 Yasen Pramatarov
 Yasmine A
 ylms

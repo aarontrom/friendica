@@ -50,9 +50,9 @@
 		$("#profile-jot-text").focus(enableOnUser);
 		$("#profile-jot-text").click(enableOnUser);
 
-		// When clicking on a forum in acl we should remove the profile jot textarea
-		// default value before inserting the forum mention
-		$("body").on('click', '#jot-modal .acl-list-item.forum', function(){
+		// When clicking on a group in acl we should remove the profile jot textarea
+		// default value before inserting the group mention
+		$("body").on('click', '#jot-modal .acl-list-item.group', function(){
 			jotTextOpenUI(document.getElementById("profile-jot-text"));
 		});
 
@@ -170,7 +170,7 @@
 				}
 			});
 
-			// Fade the the the container from the items we want to delete
+			// Fade the container from the items we want to delete
 			for(var key in  ItemsToDelete) {
 				$(ItemsToDelete[key]).fadeTo('fast', 0.33);
 			};
@@ -224,7 +224,7 @@
 	}
 
 	function linkDropper(event) {
-		var linkFound = event.dataTransfer.types.contains("text/uri-list");
+		var linkFound = event.dataTransfer.types.includes("text/uri-list");
 		if(linkFound)
 			event.preventDefault();
 	}

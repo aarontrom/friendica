@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,29 +21,17 @@
 
 namespace Friendica\Core\PConfig\Factory;
 
-use Friendica\Core\Config\ValueObject\Cache;
+use Friendica\Core\Config\Capability\IManageConfigValues;
+use Friendica\Core\Hooks\Capability\ICanCreateInstances;
 use Friendica\Core\PConfig\Capability\IManagePersonalConfigValues;
-use Friendica\Core\PConfig\Repository;
-use Friendica\Core\PConfig\Type;
-use Friendica\Core\PConfig\ValueObject;
 
 class PConfig
 {
-	/**
-	 * @param Cache              $configCache  The config cache
-	 * @param ValueObject\Cache  $pConfigCache The personal config cache
-	 * @param Repository\PConfig $configRepo   The configuration model
-	 *
-	 * @return IManagePersonalConfigValues
-	 */
-	public function create(Cache $configCache, ValueObject\Cache $pConfigCache, Repository\PConfig $configRepo): IManagePersonalConfigValues
+	public function create(ICanCreateInstances $instanceCreator, IManageConfigValues $config): IManagePersonalConfigValues
 	{
-		if ($configCache->get('system', 'config_adapter') === 'preload') {
-			$configuration = new Type\PreloadPConfig($pConfigCache, $configRepo);
-		} else {
-			$configuration = new Type\JitPConfig($pConfigCache, $configRepo);
-		}
+		$strategy = $config->get('system', 'config_adapter');
 
-		return $configuration;
+		/** @var IManagePersonalConfigValues */
+		return $instanceCreator->create(IManagePersonalConfigValues::class, $strategy);
 	}
 }

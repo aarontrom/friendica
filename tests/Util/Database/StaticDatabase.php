@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -60,13 +60,12 @@ class StaticDatabase extends Database
 		$this->driver = 'pdo';
 		$this->connection = self::$staticConnection;
 		$this->connected = true;
-		$this->emulate_prepares = false;
 
 		return $this->connected;
 	}
 
 	/**
-	 * Override the transaction since there are now hierachical transactions possible
+	 * Override the transaction since there are now hierarchical transactions possible
 	 *
 	 * @return bool
 	 */
@@ -183,7 +182,7 @@ class StaticDatabase extends Database
 			self::$staticConnection->setAttribute(PDO::ATTR_AUTOCOMMIT,0);
 		} catch (PDOException $e) {
 			/*
-			 * @TODO Try to find a way to log this exception as it contains valueable information
+			 * @TODO Try to find a way to log this exception as it contains valuable information
 			 * @nupplaphil@github.com comment:
 			 *
 			 * There is no easy possibility to add a logger here, that's why

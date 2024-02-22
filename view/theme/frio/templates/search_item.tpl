@@ -1,4 +1,8 @@
 <div id="item-{{$item.guid}}" class="item-{{$item.id}}">
+	<span class="commented" style="display: none;">{{$item.commented}}</span>
+	<span class="received" style="display: none;">{{$item.received}}</span>
+	<span class="created" style="display: none;">{{$item.created_date}}</span>
+	<span class="uriid" style="display: none;">{{$item.uriid}}</span>
 	<div class="wall-item-container panel-body{{$item.indent}} {{$item.shiny}} {{$item.previewing}}">
 		<div class="media">
 			{{* Put additional actions in a top-right dropdown menu *}}
@@ -8,14 +12,14 @@
 				<div class="hidden-sm hidden-xs contact-photo-wrapper mframe{{if $item.owner_url}} wwfrom{{/if}}">
 					<a href="{{$item.profile_url}}" class="userinfo click-card u-url" id="wall-item-photo-menu-{{$item.id}}">
 						<div class="contact-photo-image-wrapper">
-							<img src="{{$item.thumb}}" class="contact-photo media-object {{$item.sparkle}}" id="wall-item-photo-{{$item.id}}" alt="{{$item.name}}" />
+							<img src="{{$item.thumb}}" class="contact-photo media-object {{$item.sparkle}}" id="wall-item-photo-{{$item.id}}" alt="{{$item.name}}" loading="lazy"/>
 						</div>
 					</a>
 				</div>
 				<div class="hidden-lg hidden-md contact-photo-wrapper mframe{{if $item.owner_url}} wwfrom{{/if}}">
 					<a href="{{$item.profile_url}}" class="userinfo click-card u-url" id="wall-item-photo-menu-xs-{{$item.id}}">
 						<div class="contact-photo-image-wrapper">
-							<img src="{{$item.thumb}}" class="contact-photo-xs media-object {{$item.sparkle}}" id="wall-item-photo-xs-{{$item.id}}" alt="{{$item.name}}" />
+							<img src="{{$item.thumb}}" class="contact-photo-xs media-object {{$item.sparkle}}" id="wall-item-photo-xs-{{$item.id}}" alt="{{$item.name}}" loading="lazy"/>
 						</div>
 					</a>
 				</div>
@@ -23,17 +27,16 @@
 
 
 			{{* contact info header*}}
-			<div role="heading" class="contact-info hidden-sm hidden-xs media-body"><!-- <= For computer -->
+			<div class="contact-info hidden-sm hidden-xs media-body"><!-- Desktop -->
 				<div class="preferences">
-					{{if $item.network_icon != ""}}
+					{{if $item.network_icon && $item.plink}}
+						<span class="wall-item-network"><a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" target="_blank"><i class="fa fa-{{$item.network_icon}} fakelink" title="{{$item.network_name}} - {{$item.plink.title}}" aria-hidden="true"></i></a></span>
+					{{elseif $item.plink}}
+						<a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" title="{{$item.network_name}} - {{$item.plink.title}}" target="_blank">{{$item.network_name}}</a>
+					{{elseif $item.network_icon}}
 						<span class="wall-item-network"><i class="fa fa-{{$item.network_icon}}" title="{{$item.network_name}}" aria-hidden="true"></i></span>
 					{{else}}
 						<span class="wall-item-network" title="{{$item.app}}">{{$item.network_name}}</span>
-					{{/if}}
-					{{if $item.plink}}	{{*link to the original source of the item *}}
-						<a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" title="{{$item.plink.title}}">
-							<i class="fa fa-external-link"></i>
-						</a>
 					{{/if}}
 				</div>
 				<h4 class="media-heading">
@@ -77,18 +80,17 @@
 			</div>
 
 			{{* contact info header for smartphones *}}
-			<div role="heading" class="contact-info-xs hidden-lg hidden-md">
+			<div class="contact-info contact-info-xs hidden-lg hidden-md">
 				<div class="preferences">
-					{{if $item.network_icon != ""}}
-						<span class="wall-item-network"><i class="fa fa-{{$item.network_icon}}" title="{{$item.network_name}}" aria-hidden="true"></i></span>
-					{{else}}
-						<span class="wall-item-network" title="{{$item.app}}">{{$item.network_name}}</span>
-					{{/if}}
-					{{if $item.plink}}	{{*link to the original source of the item *}}
-						<a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" title="{{$item.plink.title}}">
-							<i class="fa fa-external-link"></i>
-						</a>
-					{{/if}}
+					{{if $item.network_icon && $item.plink}}
+   						<span class="wall-item-network"><a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" target="_blank"><i class="fa fa-{{$item.network_icon}} fakelink" title="{{$item.network_name}} - {{$item.plink.title}}" aria-hidden="true"></i></a></span>
+					{{elseif $item.plink}}
+       						<a href="{{$item.plink.href}}" class="plink u-url" aria-label="{{$item.plink.title}}" title="{{$item.network_name}} - {{$item.plink.title}}" target="_blank">{{$item.network_name}}</a>
+   					{{elseif $item.network_icon}}
+       						<span class="wall-item-network"><i class="fa fa-{{$item.network_icon}}" title="{{$item.network_name}}" aria-hidden="true"></i></span>
+    					{{else}}
+        					<span class="wall-item-network" title="{{$item.app}}">{{$item.network_name}}</span>
+    					{{/if}}
 				</div>
 				<h5 class="media-heading">
 					<a href="{{$item.profile_url}}" title="{{$item.linktitle}}" class="wall-item-name-link userinfo hover-card"><span>{{$item.name}}</span></a>
@@ -139,26 +141,19 @@
 
 			<p class="wall-item-actions">
 				{{* Action buttons to interact with the item (like: like, dislike, share and so on *}}
-				<span class="wall-item-actions-left">
-					<!--comment this out to try something different {{if $item.threaded}}{{if $item.comment_html}}
-					<div id="button-reply" class="pull-left">
-						<button type="button" class="btn-link" id="comment-{{$item.id}}" onclick="openClose('item-comments-{{$item.id}}'); commentExpand({{$item.id}});"><i class="fa fa-reply" title="{{$item.switchcomment}}"></i> </span>
-					</div>
-					{{/if}}{{/if}}-->
-
 					{{if $item.threaded}}{{/if}}
 
 					{{* Buttons for like and dislike *}}
 					{{if $item.vote}}
 						{{if $item.vote.like}}
-					<button type="button" class="btn btn-defaultbutton-likes{{if $item.responses.like.self}} active" aria-pressed="true{{/if}}" id="like-{{$item.id}}" title="{{$item.vote.like.0}}" onclick="doActivityItemAction({{$item.id}}, 'like'{{if $item.responses.like.self}}, true{{/if}});">{{$item.vote.like.0}}</button>
+					<button type="button" class="btn btn-defaultbutton-likes{{if $item.responses.like.self}} active" aria-pressed="true{{/if}}" id="like-{{$item.id}}" title="{{$item.vote.like.0}}" onclick="doActivityItemAction({{$item.id}}, 'like'{{if $item.responses.like.self}}, true{{/if}});"></button>
 						{{/if}}
 						{{if $item.vote.like AND $item.vote.dislike}}
 					<span role="presentation" class="separator">•</span>
 						{{/if}}
 
 						{{if $item.vote.dislike}}
-					<button type="button" class="btn btn-defaultbutton-likes{{if $item.responses.like.self}} active" aria-pressed="true{{/if}}" id="dislike-{{$item.id}}" title="{{$item.vote.dislike.0}}" onclick="doActivityItemAction({{$item.id}}, 'dislike'{{if $item.responses.dislike.self}}, true{{/if}});">{{$item.vote.dislike.0}}</button>
+					<button type="button" class="btn btn-defaultbutton-likes{{if $item.responses.like.self}} active" aria-pressed="true{{/if}}" id="dislike-{{$item.id}}" title="{{$item.vote.dislike.0}}" onclick="doActivityItemAction({{$item.id}}, 'dislike'{{if $item.responses.dislike.self}}, true{{/if}});"></button>
 						{{/if}}
 						{{if ($item.vote.like OR $item.vote.dislike) AND $item.comment_html}}
 					<span role="presentation" class="separator">•</span>
@@ -167,7 +162,7 @@
 
 					{{* Button to open the comment text field *}}
 					{{if $item.comment_html}}
-						<button type="button" class="btn btn-default" id="comment-{{$item.id}}" title="{{$item.switchcomment}}" onclick="openClose('item-comments-{{$item.id}}'); commentExpand({{$item.id}});">{{$item.switchcomment}}</button>
+						<button type="button" class="btn btn-default" id="comment-{{$item.id}}" title="{{$item.switchcomment}}" onclick="openClose('item-comments-{{$item.id}}'); commentExpand({{$item.id}});"></button>
 					{{/if}}
 
 					{{* Button for sharing the item *}}
@@ -176,7 +171,7 @@
 							{{if $item.vote.like OR $item.vote.dislike OR $item.comment_html}}
 					<span role="presentation" class="separator">•</span>
 							{{/if}}
-					<button type="button" class="btn btn-default" id="share-{{$item.id}}" title="{{$item.vote.share.0}}" onclick="jotShare({{$item.id}});"><i class="fa fa-retweet" aria-hidden="true"></i>&nbsp;{{$item.vote.share.0}}</button>
+					<button type="button" class="btn btn-default" id="share-{{$item.id}}" title="{{$item.vote.share.0}}" onclick="jotShare({{$item.id}});"><i class="fa fa-retweet" aria-hidden="true"></i></button>
 						{{/if}}
 					{{/if}}
 
@@ -242,16 +237,16 @@
 
 						{{if $item.ignore}}
 							<li role="menuitem">
-								<a id="ignore-{{$item.id}}" href="javascript:doIgnoreThread({{$item.id}});" class="btn-link {{$item.ignore.classdo}}" title="{{$item.ignore.do}}"><i class="fa fa-eye-slash" aria-hidden="true"></i> {{$item.ignore.do}}</a>
+								<a id="ignore-{{$item.id}}" href="javascript:doIgnoreThread({{$item.id}});" class="btn-link {{$item.ignore.classdo}}" title="{{$item.ignore.do}}"><i class="fa fa-bell-slash" aria-hidden="true"></i> {{$item.ignore.do}}</a>
 							</li>
 							<li role="menuitem">
-								<a id="unignore-{{$item.id}}" href="javascript:doIgnoreThread({{$item.id}});" class="btn-link {{$item.ignore.classundo}}"  title="{{$item.ignore.undo}}"><i class="fa fa-eye" aria-hidden="true"></i> {{$item.ignore.undo}}</a>
+								<a id="unignore-{{$item.id}}" href="javascript:doIgnoreThread({{$item.id}});" class="btn-link {{$item.ignore.classundo}}"  title="{{$item.ignore.undo}}"><i class="fa fa-bell" aria-hidden="true"></i> {{$item.ignore.undo}}</a>
 							</li>
 						{{/if}}
 
 						{{if $item.drop && $item.drop.dropping}}
 							<li role="menuitem">
-								<a class="btn-link navicon delete" href="javascript:dropItem('item/drop/{{$item.id}}/{{$item.return}}', 'item-{{$item.guid}}');" title="{{$item.drop.delete}}"><i class="fa fa-trash" aria-hidden="true"></i> {{$item.drop.delete}}</a>
+								<a class="btn-link navicon delete" href="javascript:dropItem('item/drop/{{$item.id}}', 'item-{{$item.guid}}');" title="{{$item.drop.label}}"><i class="fa fa-trash" aria-hidden="true"></i> {{$item.drop.label}}</a>
 							</li>
 							{{/if}}
 						</ul>
@@ -260,7 +255,6 @@
 				{{else}}
 					<img id="like-rotator-{{$item.id}}" class="like-rotator" src="images/rotator.gif" alt="{{$item.wait}}" title="{{$item.wait}}" style="display: none;" />
 				{{/if}}
-				</span>
 
 
 				<span class="wall-item-actions-right">
@@ -283,12 +277,20 @@
 			</p><!--./wall-item-actions-->
 
 			{{* Display likes, dislike and attendance stats *}}
-			{{if $item.responses}}
-			<div class="wall-item-responses">
-				{{foreach $item.responses as $verb=>$response}}
-				<div class="wall-item-{{$verb}}" id="wall-item-{{$verb}}-{{$item.id}}">{{$response.output nofilter}}</div>
+			{{if $item.emojis}}
+				{{foreach $item.emojis as $emoji}}
+					{{if $emoji.icon.fa}}
+						<span class="wall-item-emoji" title="{{$emoji.title}}"><i class="fa {{$emoji.icon.fa}}" aria-hidden="true"></i> {{$emoji.total}}</span>
+					{{else}}
+						<span class="wall-item-emoji" title="{{$emoji.title}}">{{$emoji.emoji}} {{$emoji.total}}</span>
+					{{/if}}
 				{{/foreach}}
-			</div>
+			{{elseif $item.responses}}
+				<div class="wall-item-responses">
+				{{foreach $item.responses as $verb=>$response}}
+					<div class="wall-item-{{$verb}}" id="wall-item-{{$verb}}-{{$item.id}}">{{$response.output nofilter}}</div>
+				{{/foreach}}
+				</div>
 			{{/if}}
 
 			<div class="wall-item-conv" id="wall-item-conv-{{$item.id}}" dir="auto">

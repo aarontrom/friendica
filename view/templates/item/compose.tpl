@@ -1,11 +1,11 @@
 <div class="generic-page-wrapper">
 	<h2>{{$l10n.compose_title}}</h2>
-    {{if $l10n.always_open_compose}}
+	{{if $l10n.always_open_compose}}
 	<p>{{$l10n.always_open_compose nofilter}}</p>
 	{{/if}}
 	<div id="profile-jot-wrapper">
 		<form class="comment-edit-form" data-item-id="{{$id}}" id="comment-edit-form-{{$id}}" action="compose/{{$type}}" method="post">
-		    {{*<!--<input type="hidden" name="return" value="{{$return_path}}" />-->*}}
+			{{*<!--<input type="hidden" name="return" value="{{$return_path}}" />-->*}}
 			<input type="hidden" name="post_id_random" value="{{$rand_num}}" />
 			<input type="hidden" name="post_type" value="{{$posttype}}" />
 			<input type="hidden" name="wall" value="{{$wall}}" />
@@ -13,11 +13,11 @@
 			<div id="jot-title-wrap">
 				<input type="text" name="title" id="jot-title" class="jothidden jotforms form-control" placeholder="{{$l10n.placeholdertitle}}" title="{{$l10n.placeholdertitle}}" value="{{$title}}" tabindex="1" dir="auto" />
 			</div>
-		    {{if $l10n.placeholdercategory}}
+			{{if $l10n.placeholdercategory}}
 				<div id="jot-category-wrap">
 					<input name="category" id="jot-category" class="jothidden jotforms form-control" type="text" placeholder="{{$l10n.placeholdercategory}}" title="{{$l10n.placeholdercategory}}" value="{{$category}}" tabindex="2" dir="auto" />
 				</div>
-		    {{/if}}
+			{{/if}}
 
 			<p class="comment-edit-bb-{{$id}} comment-icon-list">
 				<span>
@@ -44,23 +44,30 @@
 					<button type="button" class="btn btn-sm template-icon quote" aria-label="{{$l10n.edquote}}" title="{{$l10n.edquote}}" onclick="insertFormatting('quote',{{$id}});" tabindex="13">
 						<i class="fa fa-quote-left"></i>
 					</button>
+					<button id="button_emojipicker" type="button" class="btn btn-sm template-icon emojis" aria-label="{{$l10n.edemojis}}" title="{{$l10n.edemojis}}" tabindex="14">
+						<i class="fa fa-smile-o"></i>
+					</button>
+					<button type="button" class="btn btn-sm template-icon bb-url" aria-label="{{$l10n.contentwarn}}" title="{{$l10n.contentwarn}}" onclick="insertFormatting('abstract',{{$id}});" tabindex="9">
+						<i class="fa fa-eye"></i>
+					</button>
 				</span>
 			</p>
-			<p>
-				<textarea id="comment-edit-text-{{$id}}" class="comment-edit-text form-control text-autosize" name="body" placeholder="{{$l10n.default}}" rows="7" tabindex="3" dir="auto" dir="auto">{{$body}}</textarea>
-			</p>
-
+			<div id="dropzone-{{$id}}" class="dropzone" style="overflow:scroll">
+				<p>
+					<textarea id="comment-edit-text-{{$id}}" class="comment-edit-text form-control text-autosize" name="body" placeholder="{{$l10n.default}}" rows="7" tabindex="3" dir="auto" dir="auto" onkeydown="sendOnCtrlEnter(event, 'comment-edit-submit-{{$id}}')">{{$body}}</textarea>
+				</p>
+			</div>
 			<p class="comment-edit-submit-wrapper">
 {{if $type == 'post'}}
 				<span role="presentation" class="form-inline">
 					<input type="text" name="location" class="form-control" id="jot-location" value="{{$location}}" placeholder="{{$l10n.location_set}}"/>
 					<button type="button" class="btn btn-sm template-icon" id="profile-location"
-					        data-title-set="{{$l10n.location_set}}"
-					        data-title-disabled="{{$l10n.location_disabled}}"
-					        data-title-unavailable="{{$l10n.location_unavailable}}"
-					        data-title-clear="{{$l10n.location_clear}}"
-					        title="{{$l10n.location_set}}"
-					        tabindex="6">
+						data-title-set="{{$l10n.location_set}}"
+						data-title-disabled="{{$l10n.location_disabled}}"
+						data-title-unavailable="{{$l10n.location_unavailable}}"
+						data-title-clear="{{$l10n.location_clear}}"
+						title="{{$l10n.location_set}}"
+						tabindex="6">
 						<i class="fa fa-map-marker" aria-hidden="true"></i>
 					</button>
 				</span>
@@ -69,8 +76,8 @@
 					<img role="presentation" id="profile-rotator" src="images/rotator.gif" alt="{{$l10n.wait}}" title="{{$l10n.wait}}" style="display: none;" />
 				</span>
 				<span role="presentation" id="character-counter" class="grey text-info"></span>
-				<button type="button" class="btn btn-defaul btn-sm" onclick="preview_comment({{$id}});" id="comment-edit-preview-link-{{$id}}" tabindex="5"><i class="fa fa-eye"></i> {{$l10n.preview}}</button>
-				<button type="submit" class="btn btn-primary btn-sm" id="comment-edit-submit-{{$id}}" name="submit" tabindex="4"><i class="fa fa-envelope"></i> {{$l10n.submit}}</button>
+				<button type="button" class="btn btn-default" onclick="preview_comment({{$id}});" id="comment-edit-preview-link-{{$id}}" tabindex="5"><i class="fa fa-eye"></i> {{$l10n.preview}}</button>
+				<button type="submit" class="btn btn-primary" id="comment-edit-submit-{{$id}}" name="submit" tabindex="4"><i class="fa fa-envelope"></i> {{$l10n.submit}}</button>
 			</p>
 
 			<div id="comment-edit-preview-{{$id}}" class="comment-edit-preview" style="display:none;"></div>
@@ -86,11 +93,14 @@
 			{{if $scheduled_at}}{{$scheduled_at nofilter}}{{/if}}
 			{{if $created_at}}{{$created_at nofilter}}{{/if}}
 {{else}}
-			<input type="hidden" name="group_allow" value="{{$group_allow}}"/>
+			<input type="hidden" name="circle_allow" value="{{$circle_allow}}"/>
 			<input type="hidden" name="contact_allow" value="{{$contact_allow}}"/>
-			<input type="hidden" name="group_deny" value="{{$group_deny}}"/>
+			<input type="hidden" name="circle_deny" value="{{$circle_deny}}"/>
 			<input type="hidden" name="contact_deny" value="{{$contact_deny}}"/>
 {{/if}}
 		</form>
 	</div>
 </div>
+<script>
+	dzFactory.setupDropzone('#dropzone-{{$id}}', 'comment-edit-text-{{$id}}');
+</script>

@@ -39,8 +39,8 @@ Create a new event for the current logged in user.
 - `publish` : (optional) create message for event
 - `allow_cid` : (optional) ACL-formatted list of allowed contact ids if private event
 - `allow_gid` : (optional) ACL-formatted list of disallowed contact ids if private event
-- `deny_cid` : (optional) ACL-formatted list of allowed group ids if private event
-- `deny_gid` : (optional) ACL-formatted list of disallowed group ids if private event
+- `deny_cid` : (optional) ACL-formatted list of allowed circle ids if private event
+- `deny_gid` : (optional) ACL-formatted list of disallowed circle ids if private event
 
 ### POST api/friendica/event_delete
 
@@ -135,7 +135,7 @@ Alias of [`api/conversation/show`](#GET+api%2Fconversation%2Fshow).
 
 ### GET api/statusnet/config
 
-Returns the public Friendica node configuration. 
+Returns the public Friendica node configuration.
 
 ### GET api/gnusocial/config
 
@@ -163,7 +163,7 @@ Add or remove an activity from an item.
 * `attendmaybe`
 
 To remove an activity, prepend the verb with "un", eg. "unlike" or "undislike"
-Attend verbs disable eachother: that means that if "attendyes" was added to an item, adding "attendno" remove previous "attendyes".
+Attend verbs disable each other: that means that if "attendyes" was added to an item, adding "attendno" remove previous "attendyes".
 Attend verbs should be used only with event-related items (there is no check at the moment).
 
 #### Parameters
@@ -305,7 +305,7 @@ Returns [Private Messages](help/API-Entities#Private+message) matching the provi
 #### Parameters
 
 * `searchstring`: string for which the API call should search as '%searchstring%' in field 'body' of all messages of the authenticated user (caption ignored)
-* `getText` (optional): `plain`|`html` If ommited, the title is prepended to the plaintext body in the `text` attribute of the private message objects.
+* `getText` (optional): `plain`|`html` If omitted, the title is prepended to the plaintext body in the `text` attribute of the private message objects.
 * `getUserObjects` (optional): `true`|`false` If `false`, the `sender` and `recipient` attributes of the private message object are absent.
 
 #### Return values
@@ -323,33 +323,37 @@ On error:
 
 ---
 
-### GET api/friendica/group_show
+### GET api/friendica/circle_show
 
-Return all or a specified group of the user with the containing contacts as array.
+Alternatively: GET api/friendica/group_show (Backward compatibility)
+
+Return all or a specified circle of the user with the containing contacts as array.
 
 #### Parameters
 
-* `gid`: optional, if not given, API returns all groups of the user
+* `gid`: optional, if not given, API returns all circles of the user
 
 #### Return values
 
 Array of:
 
-* `name`: name of the group
-* `gid`: id of the group
+* `name`: name of the circle
+* `gid`: id of the circle
 * `user`: array of [Contacts](help/API-Entities#Contact)
 
-### POST api/friendica/group_create
+### POST api/friendica/circle_create
 
-Create the group with the posted array of contacts as members.
+Alternatively: POST api/friendica/group_create
+
+Create the circle with the posted array of contacts as members.
 
 #### Parameters
 
-* `name`: name of the group to be created
+* `name`: name of the circle to be created
 
 #### POST data
 
-JSON data as Array like the result of [GET api/friendica/group_show](#GET+api%2Ffriendica%2Fgroup_show):
+JSON data as Array like the result of [GET api/friendica/circle_show](#GET+api%2Ffriendica%2Fcircle_show):
 
 * `gid`
 * `name`
@@ -360,23 +364,25 @@ JSON data as Array like the result of [GET api/friendica/group_show](#GET+api%2F
 Array of:
 
 * `success`: true if successfully created or reactivated
-* `gid`: gid of the created group
-* `name`: name of the created group
+* `gid`: gid of the created circle
+* `name`: name of the created circle
 * `status`: "missing user" | "reactivated" | "ok"
 * `wrong users`: array of users, which were not available in the contact table
 
-### POST api/friendica/group_update
+### POST api/friendica/circle_update
 
-Update the group with the posted array of contacts as members (post all members of the group to the call; function will remove members not posted).
+Alternatively: POST api/friendica/group_update
+
+Update the circle with the posted array of contacts as members (post all members of the circle to the call; function will remove members not posted).
 
 #### Parameters
 
-* `gid`: id of the group to be changed
-* `name`: name of the group to be changed
+* `gid`: id of the circle to be changed
+* `name`: name of the circle to be changed
 
 #### POST data
 
-JSON data as array like the result of [GET api/friendica/group_show](#GET+api%2Ffriendica%2Fgroup_show):
+JSON data as array like the result of [GET api/friendica/circle_show](#GET+api%2Ffriendica%2Fcircle_show):
 
 * `gid`
 * `name`
@@ -387,27 +393,29 @@ JSON data as array like the result of [GET api/friendica/group_show](#GET+api%2F
 Array of:
 
 * `success`: true if successfully updated
-* `gid`: gid of the changed group
-* `name`: name of the changed group
+* `gid`: gid of the changed circle
+* `name`: name of the changed circle
 * `status`: "missing user" | "ok"
 * `wrong users`: array of users, which were not available in the contact table
 
-### POST api/friendica/group_delete
+### POST api/friendica/circle_delete
 
-Delete the specified group of contacts; API call need to include the correct gid AND name of the group to be deleted.
+Alternatively: POST api/friendica/group_delete
+
+Delete the specified circle of contacts; API call need to include the correct gid AND name of the circle to be deleted.
 
 #### Parameters
 
-* `gid`: id of the group to be deleted
-* `name`: name of the group to be deleted
+* `gid`: id of the circle to be deleted
+* `name`: name of the circle to be deleted
 
 #### Return values
 
 Array of:
 
 * `success`: true if successfully deleted
-* `gid`: gid of the deleted group
-* `name`: name of the deleted group
+* `gid`: gid of the deleted circle
+* `name`: name of the deleted circle
 * `status`: "deleted" if successfully deleted
 * `wrong users`: empty array
 
@@ -556,7 +564,7 @@ Alias of [`api/friendica/photo/update`](#POST+api%2Ffriendica%2Fphoto%2Fupdate)
 
 Saves data for the scales 0-2 to database (see above for scale description).
 Call adds non-public entries to items table to enable authenticated contacts to comment/like the photo.
-Client should pay attention to the fact that updated access rights are not transferred to the contacts. i.e. public photos remain publicly visible if they have been commented/liked before setting visibility back to a limited group.
+Client should pay attention to the fact that updated access rights are not transferred to the contacts. i.e. public photos remain publicly visible if they have been commented/liked before setting visibility back to a limited circle.
 Currently it is best to inform user that updating rights is not the right way to do this, and offer a solution to add photo as a new photo with the new rights instead.
 
 #### Parameters
@@ -604,7 +612,7 @@ Sets item table entries for this photo to deleted = 1.
 
 On success:
 
-* JSON return 
+* JSON return
 
 ```json
 {
@@ -633,7 +641,7 @@ Deletes all images with the specified album name, is not reversible -> ensure th
 
 On success:
 
-* JSON return 
+* JSON return
 
 ```json
 {
@@ -646,7 +654,7 @@ On error:
 
 * 403 FORBIDDEN: if not authenticated
 * 400 BADREQUEST: "no albumname specified", "album not available"
-* 500 INTERNALSERVERERROR: "problem with deleting item occured", "unknown error - deleting from database failed"
+* 500 INTERNALSERVERERROR: "problem with deleting item occurred", "unknown error - deleting from database failed"
 
 ### POST api/friendica/photoalbum/update
 
@@ -665,8 +673,8 @@ On success:
 
 ```json
 {
-    "result": "updated",
-    "message":"album 'abc' with all containing photos has been renamed to 'xyz'."
+  "result": "updated",
+  "message":"album 'abc' with all containing photos has been renamed to 'xyz'."
 }
 ```
 
@@ -676,7 +684,91 @@ On error:
 * 400 BADREQUEST: "no albumname specified", "no new albumname specified", "album not available"
 * 500 INTERNALSERVERERROR: "unknown error - updating in database failed"
 
+### GET api/friendica/photoalbums
+
+Get a list of photo albums for the user
+
+#### Parameters
+
+None
+#### Return values
+
+On success a list of photo album objects:
+
+```json
+[
+  {
+    "name": "Wall Photos",
+    "created": "2023-01-22 02:03:19",
+    "count": 4
+  },
+  {
+    "name": "Profile photos",
+    "created": "2022-11-20 14:40:06",
+    "count": 1
+  }
+]
+```
+
+### GET api/friendica/photoalbum
+
+Get a list of images in a photo album
+#### Parameters
+
+* `album` (Required): name of the album to be deleted
+* `limit` (Optional): Maximum number of items to get, defaults to 50, max 500
+* `offset`(Optional): Offset in results to page through total items, defaults to 0
+* `latest_first` (Optional): Reverse the order so the most recent images are first, defaults to false
+
+#### Return values
+
+On success:
+
+* JSON return with the list of Photo items
+
+**Example:**
+`https://<server>/api/friendica/photoalbum?album=Wall Photos&limit=10&offset=2`
+
+```json
+[
+  {
+    "created": "2023-02-14 14:31:06",
+    "edited": "2023-02-14 14:31:14",
+    "title": "",
+    "desc": "",
+    "album": "Wall Photos",
+    "filename": "image.png",
+    "type": "image/png",
+    "height": 835,
+    "width": 693,
+    "datasize": 119523,
+    "profile": 0,
+    "allow_cid": "",
+    "deny_cid": "",
+    "allow_gid": "",
+    "deny_gid": "",
+    "id": "899184972463eb9b2ae3dc2580502826",
+    "scale": 0,
+    "media-id": 52,
+    "scales": [
+      {
+        "id": 52,
+        "scale": 0,
+        "link": "https://<server>/photo/899184972463eb9b2ae3dc2580502826-0.png",
+        "width": 693,
+        "height": 835,
+        "size": 119523
+      },
+      ...
+    ],
+    "thumb": "https://<server>/photo/899184972463eb9b2ae3dc2580502826-2.png"
+  },
+  ...
+]
+```
+
 ---
+
 
 ### GET api/friendica/profile/show
 
@@ -712,6 +804,129 @@ General description of profile data in API returns:
 - country
 - pub_keywords
 - custom_fields: list of public custom fields
+
+---
+
+### POST api/friendica/statuses/:id/dislike
+
+Marks the given status as disliked by this user
+
+#### Path Parameter
+
+* `id`: the status ID that is being marked
+
+#### Return values
+
+A Mastodon [Status Entity](https://docs.joinmastodon.org/entities/Status/)
+
+#### Example:
+`https://<server_name>/api/friendica/statuses/341/dislike`
+
+```json
+{
+  "id": "341",
+  "created_at": "2023-02-23T01:50:00.000Z",
+  "in_reply_to_id": null,
+  "in_reply_to_status": null,
+  "in_reply_to_account_id": null,
+  "sensitive": false,
+  "spoiler_text": "",
+  "visibility": "public",
+  "language": "en",
+  ...
+  "account": {
+    "id": "8",
+    "username": "testuser2",
+    ...
+  },
+  "media_attachments": [],
+  "mentions": [],
+  "tags": [],
+  "emojis": [],
+  "card": null,
+  "poll": null,
+  "friendica": {
+    "title": "",
+    "dislikes_count": 1,
+    "disliked": true
+  }
+}
+```
+
+
+### GET api/friendica/statuses/:id/disliked_by
+
+Returns the list of accounts that have disliked the status as known by the current server
+
+#### Path Parameter
+
+* `id`: the status ID that is being marked
+
+#### Return values
+
+A list of [Mastodon Account](https://docs.joinmastodon.org/entities/Account/) objects
+in the body and next/previous link headers in the header
+
+#### Example:
+`https://<server_name>/api/friendica/statuses/341/disliked_by`
+
+```json
+[
+  {
+    "id": "6",
+    "username": "testuser1",
+    ...
+  }
+]
+```
+
+
+
+### POST api/friendica/statuses/:id/undislike
+
+Removes the dislike mark (if it exists) on this status for this user
+
+#### Path Parameter
+
+* `id`: the status ID that is being marked
+
+#### Return values
+
+A Mastodon [Status Entity](https://docs.joinmastodon.org/entities/Status/)
+
+#### Example:
+`https://<server_name>/api/friendica/statuses/341/undislike`
+
+```json
+{
+  "id": "341",
+  "created_at": "2023-02-23T01:50:00.000Z",
+  "in_reply_to_id": null,
+  "in_reply_to_status": null,
+  "in_reply_to_account_id": null,
+  "sensitive": false,
+  "spoiler_text": "",
+  "visibility": "public",
+  "language": "en",
+  ...
+  "account": {
+    "id": "8",
+    "username": "testuser2",
+    ...
+  },
+  "media_attachments": [],
+  "mentions": [],
+  "tags": [],
+  "emojis": [],
+  "card": null,
+  "poll": null,
+  "friendica": {
+    "title": "",
+    "dislikes_count": 0,
+    "disliked": false
+  }
+}
+```
 
 ---
 

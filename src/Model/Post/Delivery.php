@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -78,7 +78,7 @@ class Delivery
 	 */
 	public static function incrementFailed(int $uri_id, string $inbox)
 	{
-		return DBA::e('UPDATE `post-delivery` SET `failed` = `failed` + 1 WHERE `uri-id` = ? AND `inbox-id` = ?', $uri_id, ItemURI::getIdByURI($inbox));
+		return DBA::update('post-delivery', ["`failed` = `failed` + 1"], ['uri-id' => $uri_id, 'inbox-id' => ItemURI::getIdByURI($inbox)]);
 	}
 
 	public static function selectForInbox(string $inbox)

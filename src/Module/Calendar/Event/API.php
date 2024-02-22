@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -39,11 +39,11 @@ use Friendica\Module\Response;
 use Friendica\Navigation\SystemMessages;
 use Friendica\Network\HTTPException\BadRequestException;
 use Friendica\Network\HTTPException\UnauthorizedException;
+use Friendica\Protocol\Delivery;
 use Friendica\Util\ACLFormatter;
 use Friendica\Util\DateTimeFormat;
 use Friendica\Util\Profiler;
 use Friendica\Util\Strings;
-use Friendica\Worker\Delivery;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -183,7 +183,7 @@ class API extends BaseModule
 
 		if (strcmp($finish, $start) < 0 && !$noFinish) {
 			if ($isPreview) {
-				System::httpExit($this->t('Event can not end before it has started.'));
+				$this->httpExit($this->t('Event can not end before it has started.'));
 			} else {
 				$this->sysMessages->addNotice($this->t('Event can not end before it has started.'));
 				$this->baseUrl->redirect($redirectOnError);
@@ -192,7 +192,7 @@ class API extends BaseModule
 
 		if (empty($summary) || ($start === DBA::NULL_DATETIME)) {
 			if ($isPreview) {
-				System::httpExit($this->t('Event title and start time are required.'));
+				$this->httpExit($this->t('Event title and start time are required.'));
 			} else {
 				$this->sysMessages->addNotice($this->t('Event title and start time are required.'));
 				$this->baseUrl->redirect($redirectOnError);
@@ -212,14 +212,14 @@ class API extends BaseModule
 			}
 
 			$strAclContactAllow = isset($request['contact_allow']) ? $aclFormatter->toString($request['contact_allow']) : $user['allow_cid'] ?? '';
-			$strAclGroupAllow   = isset($request['group_allow']) ? $aclFormatter->toString($request['group_allow']) : $user['allow_gid']     ?? '';
-			$strContactDeny     = isset($request['contact_deny']) ? $aclFormatter->toString($request['contact_deny']) : $user['deny_cid']    ?? '';
-			$strGroupDeny       = isset($request['group_deny']) ? $aclFormatter->toString($request['group_deny']) : $user['deny_gid']        ?? '';
+			$strAclCircleAllow  = isset($request['circle_allow'])  ? $aclFormatter->toString($request['circle_allow'])  : $user['allow_gid'] ?? '';
+			$strContactDeny     = isset($request['contact_deny'])  ? $aclFormatter->toString($request['contact_deny'])  : $user['deny_cid']  ?? '';
+			$strCircleDeny      = isset($request['circle_deny'])   ? $aclFormatter->toString($request['circle_deny'])   : $user['deny_gid']  ?? '';
 
 			$visibility = $request['visibility'] ?? '';
 			if ($visibility === 'public') {
 				// The ACL selector introduced in version 2019.12 sends ACL input data even when the Public visibility is selected
-				$strAclContactAllow = $strAclGroupAllow = $strContactDeny = $strGroupDeny = '';
+				$strAclContactAllow = $strAclCircleAllow = $strContactDeny = $strCircleDeny = '';
 			} elseif ($visibility === 'custom') {
 				// Since we know from the visibility parameter the item should be private, we have to prevent the empty ACL
 				// case that would make it public. So we always append the author's contact id to the allowed contacts.
@@ -228,9 +228,9 @@ class API extends BaseModule
 			}
 		} else {
 			$strAclContactAllow = $aclFormatter->toString($self);
-			$strAclGroupAllow   = '';
+			$strAclCircleAllow  = '';
 			$strContactDeny     = '';
-			$strGroupDeny       = '';
+			$strCircleDeny      = '';
 		}
 
 		$datarray = [
@@ -244,14 +244,14 @@ class API extends BaseModule
 			'uid'       => $uid,
 			'cid'       => $cid,
 			'allow_cid' => $strAclContactAllow,
-			'allow_gid' => $strAclGroupAllow,
+			'allow_gid' => $strAclCircleAllow,
 			'deny_cid'  => $strContactDeny,
-			'deny_gid'  => $strGroupDeny,
+			'deny_gid'  => $strCircleDeny,
 			'id'        => $eventId,
 		];
 
 		if (intval($request['preview'])) {
-			System::httpExit(Event::getHTML($datarray));
+			$this->httpExit(Event::getHTML($datarray));
 		}
 
 		$eventId = Event::store($datarray);

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,6 +22,7 @@
 
 namespace Friendica\Module\Update;
 
+use Friendica\Content\Conversation;
 use Friendica\Core\System;
 use Friendica\DI;
 use Friendica\Module\Conversation\Community as CommunityModule;
@@ -35,11 +36,11 @@ class Community extends CommunityModule
 {
 	protected function rawContent(array $request = [])
 	{
-		$this->parseRequest();
+		$this->parseRequest($request);
 
 		$o = '';
-		if (!empty($_GET['force']) || !DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'no_auto_update')) {
-			$o = DI::conversation()->create(self::getItems(), 'community', true, false, 'commented', DI::userSession()->getLocalUserId());
+		if ($this->update || $this->force) {
+			$o = DI::conversation()->render($this->getCommunityItems(), Conversation::MODE_COMMUNITY, true, false, 'commented', DI::userSession()->getLocalUserId());
 		}
 
 		System::htmlUpdateExit($o);

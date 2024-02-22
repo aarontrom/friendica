@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -140,6 +140,8 @@ class ContactSelector
 			Protocol::STATUSNET =>   DI::l10n()->t('GNU Social Connector'),
 			Protocol::ACTIVITYPUB => DI::l10n()->t('ActivityPub'),
 			Protocol::PNUT      =>   DI::l10n()->t('pnut'),
+			Protocol::TUMBLR    =>   DI::l10n()->t('Tumblr'),
+			Protocol::BLUESKY   =>   DI::l10n()->t('Bluesky'),
 		];
 
 		Hook::callAll('network_to_name', $nets);
@@ -210,13 +212,17 @@ class ContactSelector
 			Protocol::STATUSNET =>   'gnu-social',
 			Protocol::ACTIVITYPUB => 'activitypub',
 			Protocol::PNUT      =>   'file-text-o', /// @todo
+			Protocol::TUMBLR    =>   'tumblr',
+			Protocol::BLUESKY   =>   'circle', /// @todo
 		];
 
 		$platform_icons = ['diaspora' => 'diaspora', 'friendica' => 'friendica', 'friendika' => 'friendica',
 			'GNU Social' => 'gnu-social', 'gnusocial' => 'gnu-social', 'hubzilla' => 'hubzilla',
 			'mastodon' => 'mastodon', 'peertube' => 'peertube', 'pixelfed' => 'pixelfed',
 			'pleroma' => 'pleroma', 'red' => 'hubzilla', 'redmatrix' => 'hubzilla',
-			'socialhome' => 'social-home', 'wordpress' => 'wordpress'];
+			'socialhome' => 'social-home', 'wordpress' => 'wordpress', 'lemmy' => 'users',
+			'plume' => 'plume', 'funkwhale' => 'funkwhale', 'nextcloud' => 'nextcloud', 'drupal' => 'drupal',
+			'firefish' => 'fire', 'calckey' => 'calculator', 'kbin' => 'check', 'threads' => 'instagram'];
 
 		$search  = array_keys($nets);
 		$replace = array_values($nets);

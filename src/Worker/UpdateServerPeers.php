@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -27,6 +27,7 @@ use Friendica\Database\DBA;
 use Friendica\DI;
 use Friendica\Model\GServer;
 use Friendica\Network\HTTPClient\Client\HttpClientAccept;
+use Friendica\Util\Network;
 use Friendica\Util\Strings;
 
 class UpdateServerPeers
@@ -39,6 +40,10 @@ class UpdateServerPeers
 	 */
 	public static function execute(string $url)
 	{
+		if (!DI::config()->get('system', 'poco_discovery')) {
+			return;
+		}
+
 		$ret = DI::httpClient()->get($url . '/api/v1/instance/peers', HttpClientAccept::JSON);
 		if (!$ret->isSuccess() || empty($ret->getBody())) {
 			Logger::info('Server is not reachable or does not offer the "peers" endpoint', ['url' => $url]);
@@ -56,6 +61,11 @@ class UpdateServerPeers
 		$total = 0;
 		$added = 0;
 		foreach ($peers as $peer) {
+			if (Network::isUrlBlocked('https://' . $peer)) {
+				// Ignore blocked systems as soon as possible in the loop to avoid being slowed down by tar pits
+				continue;
+			}
+
 			++$total;
 			if (DBA::exists('gserver', ['nurl' => Strings::normaliseLink('http://' . $peer)])) {
 				// We already know this server

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -61,15 +61,15 @@ class Notify extends BaseEntity
 	protected $photo;
 	/** @var DateTime */
 	protected $date;
-	/** @var string */
+	/** @var string|null */
 	protected $msg;
 	/** @var int */
 	protected $uid;
 	/** @var UriInterface */
 	protected $link;
-	/** @var int */
+	/** @var int|null */
 	protected $itemId;
-	/** @var int */
+	/** @var int|null */
 	protected $parent;
 	/** @var bool */
 	protected $seen;
@@ -79,13 +79,13 @@ class Notify extends BaseEntity
 	protected $otype;
 	/** @var string */
 	protected $name_cache;
-	/** @var string */
+	/** @var string|null */
 	protected $msg_cache;
 	/** @var int|null */
 	protected $uriId;
 	/** @var int|null */
 	protected $parentUriId;
-	/** @var int */
+	/** @var int|null */
 	protected $id;
 
 	public function __construct(int $type, string $name, UriInterface $url, UriInterface $photo, DateTime $date, int $uid, UriInterface $link, bool $seen, string $verb, string $otype, string $name_cache, string $msg = null, string $msg_cache = null, int $itemId = null, int $uriId = null, int $parent = null, ?int $parentUriId = null, ?int $id = null)
@@ -118,7 +118,7 @@ class Notify extends BaseEntity
 	public function updateMsgFromPreamble($epreamble)
 	{
 		$this->msg       = Renderer::replaceMacros($epreamble, ['$itemlink' => $this->link->__toString()]);
-		$this->msg_cache = self::formatMessage($this->name_cache, strip_tags(BBCode::convert($this->msg)));
+		$this->msg_cache = self::formatMessage($this->name_cache, BBCode::toPlaintext($this->msg, false));
 	}
 
 	/**
@@ -134,6 +134,6 @@ class Notify extends BaseEntity
 	 */
 	public static function formatMessage(string $name, string $message): string
 	{
-		return str_replace('{0}', '<span class="contactname">' . strip_tags(BBCode::convert($name)) . '</span>', $message);
+		return str_replace('{0}', '<span class="contactname">' . htmlspecialchars(BBCode::toPlaintext($name, false)) . '</span>', htmlspecialchars($message));
 	}
 }

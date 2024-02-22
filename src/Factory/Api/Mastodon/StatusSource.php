@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -38,10 +38,10 @@ class StatusSource extends BaseFactory
 	 */
 	public function createFromUriId(int $uriId, int $uid): \Friendica\Object\Api\Mastodon\StatusSource
 	{
-		$post = Post::selectFirst(['uri-id', 'raw-body', 'body', 'title'], ['uri-id' => $uriId, 'uid' => [0, $uid]]);
+		$post = Post::selectOriginal(['uri-id', 'raw-body', 'body', 'title'], ['uri-id' => $uriId, 'uid' => [0, $uid]]);
 
 		$spoiler_text = $post['title'] ?: BBCode::toPlaintext(BBCode::getAbstract($post['body'], Protocol::ACTIVITYPUB));
-		$body         = BBCode::toMarkdown($post['body']);
+		$body         = BBCode::toMarkdown(Post\Media::removeFromEndOfBody($post['body']));
 
 		return new \Friendica\Object\Api\Mastodon\StatusSource($post['uri-id'], $body, $spoiler_text);
 	}

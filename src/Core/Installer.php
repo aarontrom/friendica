@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -98,17 +98,17 @@ class Installer
 	 * Checks the current installation environment. There are optional and mandatory checks.
 	 *
 	 * @param string $baseurl The baseurl of Friendica
-	 * @param string $phpath  Optional path to the PHP binary
+	 * @param string $phppath Optional path to the PHP binary
 	 *
 	 * @return bool if the check succeed
 	 * @throws \Friendica\Network\HTTPException\InternalServerErrorException
 	 */
-	public function checkEnvironment($baseurl, $phpath = null)
+	public function checkEnvironment($baseurl, $phppath = null)
 	{
 		$returnVal = true;
 
-		if (isset($phpath)) {
-			if (!$this->checkPHP($phpath)) {
+		if (isset($phppath)) {
+			if (!$this->checkPHP($phppath)) {
 				$returnVal = false;
 			}
 		}
@@ -158,23 +158,20 @@ class Installer
 	{
 		$basepath = $configCache->get('system', 'basepath');
 
-		$tpl = Renderer::getMarkupTemplate('local.config.tpl');
+		$tpl = Renderer::getMarkupTemplate('install/local.config.tpl');
 		$txt = Renderer::replaceMacros($tpl, [
-			'$dbhost'    => $configCache->get('database', 'hostname'),
-			'$dbuser'    => $configCache->get('database', 'username'),
-			'$dbpass'    => $configCache->get('database', 'password'),
-			'$dbdata'    => $configCache->get('database', 'database'),
+			'$dbhost'     => $configCache->get('database', 'hostname'),
+			'$dbuser'     => $configCache->get('database', 'username'),
+			'$dbpass'     => $configCache->get('database', 'password'),
+			'$dbdata'     => $configCache->get('database', 'database'),
 
-			'$phpath'    => $configCache->get('config', 'php_path'),
-			'$adminmail' => $configCache->get('config', 'admin_email'),
-			'$hostname'  => $configCache->get('config', 'hostname'),
+			'$phppath'    => $configCache->get('config', 'php_path'),
+			'$adminmail'  => $configCache->get('config', 'admin_email'),
 
-			'$urlpath'   => $configCache->get('system', 'urlpath'),
-			'$baseurl'   => $configCache->get('system', 'url'),
-			'$sslpolicy' => $configCache->get('system', 'ssl_policy'),
-			'$basepath'  => $basepath,
-			'$timezone'  => $configCache->get('system', 'default_timezone'),
-			'$language'  => $configCache->get('system', 'language'),
+			'$system_url' => $configCache->get('system', 'url'),
+			'$basepath'   => $basepath,
+			'$timezone'   => $configCache->get('system', 'default_timezone'),
+			'$language'   => $configCache->get('system', 'language'),
 		]);
 
 		$result = file_put_contents($basepath . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'local.config.php', $txt);
@@ -387,12 +384,10 @@ class Installer
 
 		$help = '';
 		$status = true;
-		if (function_exists('apache_get_modules')) {
-			if (!in_array('mod_rewrite', apache_get_modules())) {
-				$help = DI::l10n()->t('Error: Apache webserver mod-rewrite module is required but not installed.');
-				$status = false;
-				$returnVal = false;
-			}
+		if (function_exists('apache_get_modules') && !in_array('mod_rewrite', apache_get_modules())) {
+			$help = DI::l10n()->t('Error: Apache webserver mod-rewrite module is required but not installed.');
+			$status = false;
+			$returnVal = false;
 		}
 		$this->addCheck(DI::l10n()->t('Apache mod_rewrite module'), $status, true, $help);
 
@@ -402,14 +397,21 @@ class Installer
 			$status = false;
 			$help = DI::l10n()->t('Error: PDO or MySQLi PHP module required but not installed.');
 			$returnVal = false;
-		} else {
-			if (!function_exists('mysqli_connect') && class_exists('pdo') && !in_array('mysql', \PDO::getAvailableDrivers())) {
-				$status = false;
-				$help = DI::l10n()->t('Error: The MySQL driver for PDO is not installed.');
-				$returnVal = false;
-			}
+		} elseif (!function_exists('mysqli_connect') && class_exists('pdo') && !in_array('mysql', \PDO::getAvailableDrivers())) {
+			$status = false;
+			$help = DI::l10n()->t('Error: The MySQL driver for PDO is not installed.');
+			$returnVal = false;
 		}
 		$this->addCheck(DI::l10n()->t('PDO or MySQLi PHP module'), $status, true, $help);
+
+		$help   = '';
+		$status = true;
+		if (!class_exists('IntlChar')) {
+			$status    = false;
+			$help      = DI::l10n()->t('Error: The IntlChar module is not installed.');
+			$returnVal = false;
+		}
+		$this->addCheck(DI::l10n()->t('IntlChar PHP module'), $status, true, $help);
 
 		// check for XML DOM Documents being able to be generated
 		$help = '';
@@ -593,8 +595,8 @@ class Installer
 	 * TLS Check
 	 *
 	 * Tries to determine whether the connection to the server is secured
-	 * by TLS or not. If not the user will be warned that it is higly
-	 * encuraged to use TLS.
+	 * by TLS or not. If not the user will be warned that it is highly
+	 * encouraged to use TLS.
 	 *
 	 * @return bool (true) as TLS is not mandatory
 	 */
@@ -607,7 +609,7 @@ class Installer
 				$tls = true;
 			}
 		}
-		
+
 		if (!$tls) {
 			$help = DI::l10n()->t('The detection of TLS to secure the communication between the browser and the new Friendica server failed.');
 			$help .= ' ' . DI::l10n()->t('It is highly encouraged to use Friendica only over a secure connection as sensitive information like passwords will be transmitted.');

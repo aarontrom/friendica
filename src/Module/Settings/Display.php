@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,7 +22,13 @@
 namespace Friendica\Module\Settings;
 
 use Friendica\App;
+use Friendica\Content\Conversation\Collection\Timelines;
 use Friendica\Content\Text\BBCode;
+use Friendica\Content\Conversation\Factory\Channel as ChannelFactory;
+use Friendica\Content\Conversation\Factory\Community as CommunityFactory;
+use Friendica\Content\Conversation\Factory\Network as NetworkFactory;
+use Friendica\Content\Conversation\Factory\Timeline as TimelineFactory;
+use Friendica\Content\Conversation\Repository;
 use Friendica\Core\Config\Capability\IManageConfigValues;
 use Friendica\Core\Hook;
 use Friendica\Core\L10n;
@@ -51,15 +57,30 @@ class Display extends BaseSettings
 	private $app;
 	/** @var SystemMessages */
 	private $systemMessages;
+	/** @var ChannelFactory */
+	protected $channel;
+	/** @var Repository\UserDefinedChannel */
+	protected $userDefinedChannel;
+	/** @var CommunityFactory */
+	protected $community;
+	/** @var NetworkFactory */
+	protected $network;
+	/** @var TimelineFactory */
+	protected $timeline;
 
-	public function __construct(SystemMessages $systemMessages, App $app, IManagePersonalConfigValues $pConfig, IManageConfigValues $config, IHandleUserSessions $session, App\Page $page, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, Response $response, array $server, array $parameters = [])
+	public function __construct(Repository\UserDefinedChannel $userDefinedChannel, NetworkFactory $network, CommunityFactory $community, ChannelFactory $channel, TimelineFactory $timeline, SystemMessages $systemMessages, App $app, IManagePersonalConfigValues $pConfig, IManageConfigValues $config, IHandleUserSessions $session, App\Page $page, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, Response $response, array $server, array $parameters = [])
 	{
 		parent::__construct($session, $page, $l10n, $baseUrl, $args, $logger, $profiler, $response, $server, $parameters);
 
-		$this->config         = $config;
-		$this->pConfig        = $pConfig;
-		$this->app            = $app;
-		$this->systemMessages = $systemMessages;
+		$this->config             = $config;
+		$this->pConfig            = $pConfig;
+		$this->app                = $app;
+		$this->systemMessages     = $systemMessages;
+		$this->timeline           = $timeline;
+		$this->channel            = $channel;
+		$this->community          = $community;
+		$this->network            = $network;
+		$this->userDefinedChannel = $userDefinedChannel;
 	}
 
 	protected function post(array $request = [])
@@ -73,23 +94,41 @@ class Display extends BaseSettings
 
 		$user = User::getById($uid);
 
-		$theme                  = !empty($request['theme'])                  ? trim($request['theme'])                    : $user['theme'];
-		$mobile_theme           = !empty($request['mobile_theme'])           ? trim($request['mobile_theme'])             : '';
-		$enable_smile           = !empty($request['enable_smile'])           ? intval($request['enable_smile'])           : 0;
-		$first_day_of_week      = !empty($request['first_day_of_week'])      ? intval($request['first_day_of_week'])      : 0;
-		$calendar_default_view  = !empty($request['calendar_default_view'])  ? trim($request['calendar_default_view'])    : 'month';
-		$infinite_scroll        = !empty($request['infinite_scroll'])        ? intval($request['infinite_scroll'])        : 0;
-		$no_auto_update         = !empty($request['no_auto_update'])         ? intval($request['no_auto_update'])         : 0;
-		$enable_smart_threading = !empty($request['enable_smart_threading']) ? intval($request['enable_smart_threading']) : 0;
-		$enable_dislike         = !empty($request['enable_dislike'])         ? intval($request['enable_dislike'])         : 0;
-		$display_resharer       = !empty($request['display_resharer'])       ? intval($request['display_resharer'])       : 0;
-		$stay_local             = !empty($request['stay_local'])             ? intval($request['stay_local'])             : 0;
-		$preview_mode           = !empty($request['preview_mode'])           ? intval($request['preview_mode'])           : 0;
-		$browser_update         = !empty($request['browser_update'])         ? intval($request['browser_update'])         : 0;
+		$theme                  = trim($request['theme']);
+		$mobile_theme           = trim($request['mobile_theme'] ?? '');
+		$enable_smile           = (bool)$request['enable_smile'];
+		$enable                 = (array)$request['enable'];
+		$bookmark               = (array)$request['bookmark'];
+		$channel_languages      = (array)$request['channel_languages'];
+		$first_day_of_week      = (bool)$request['first_day_of_week'];
+		$calendar_default_view  = trim($request['calendar_default_view']);
+		$infinite_scroll        = (bool)$request['infinite_scroll'];
+		$enable_smart_threading = (bool)$request['enable_smart_threading'];
+		$enable_dislike         = (bool)$request['enable_dislike'];
+		$display_resharer       = (bool)$request['display_resharer'];
+		$stay_local             = (bool)$request['stay_local'];
+		$show_page_drop         = (bool)$request['show_page_drop'];
+		$display_eventlist      = (bool)$request['display_eventlist'];
+		$preview_mode           = (int)$request['preview_mode'];
+		$browser_update         = (int)$request['browser_update'];
 		if ($browser_update != -1) {
 			$browser_update = $browser_update * 1000;
 			if ($browser_update < 10000) {
 				$browser_update = 10000;
+			}
+		}
+
+		$enabled_timelines = [];
+		foreach ($enable as $code => $enabled) {
+			if ($enabled) {
+				$enabled_timelines[] = $code;
+			}
+		}
+
+		$network_timelines = [];
+		foreach ($bookmark as $code => $bookmarked) {
+			if ($bookmarked) {
+				$network_timelines[] = $code;
 			}
 		}
 
@@ -113,17 +152,22 @@ class Display extends BaseSettings
 		$this->pConfig->set($uid, 'system', 'itemspage_network'       , $itemspage_network);
 		$this->pConfig->set($uid, 'system', 'itemspage_mobile_network', $itemspage_mobile_network);
 		$this->pConfig->set($uid, 'system', 'update_interval'         , $browser_update);
-		$this->pConfig->set($uid, 'system', 'no_auto_update'          , $no_auto_update);
 		$this->pConfig->set($uid, 'system', 'no_smilies'              , !$enable_smile);
 		$this->pConfig->set($uid, 'system', 'infinite_scroll'         , $infinite_scroll);
 		$this->pConfig->set($uid, 'system', 'no_smart_threading'      , !$enable_smart_threading);
 		$this->pConfig->set($uid, 'system', 'hide_dislike'            , !$enable_dislike);
 		$this->pConfig->set($uid, 'system', 'display_resharer'        , $display_resharer);
 		$this->pConfig->set($uid, 'system', 'stay_local'              , $stay_local);
+		$this->pConfig->set($uid, 'system', 'show_page_drop'          , $show_page_drop);
+		$this->pConfig->set($uid, 'system', 'display_eventlist'       , $display_eventlist);
 		$this->pConfig->set($uid, 'system', 'preview_mode'            , $preview_mode);
 
+		$this->pConfig->set($uid, 'system', 'network_timelines'       , $network_timelines);
+		$this->pConfig->set($uid, 'system', 'enabled_timelines'       , $enabled_timelines);
+		$this->pConfig->set($uid, 'channel', 'languages'              , $channel_languages);
+
 		$this->pConfig->set($uid, 'calendar', 'first_day_of_week'     , $first_day_of_week);
-		$this->pConfig->set($uid, 'calendar', 'default_view'           , $calendar_default_view);
+		$this->pConfig->set($uid, 'calendar', 'default_view'          , $calendar_default_view);
 
 		if (in_array($theme, Theme::getAllowedList())) {
 			if ($theme == $user['theme']) {
@@ -202,13 +246,14 @@ class Display extends BaseSettings
 			$browser_update = (($browser_update == 0) ? 40 : $browser_update / 1000); // default if not set: 40 seconds
 		}
 
-		$no_auto_update         =  $this->pConfig->get($uid, 'system', 'no_auto_update', 0);
-		$enable_smile           = !$this->pConfig->get($uid, 'system', 'no_smilies', 0);
-		$infinite_scroll        =  $this->pConfig->get($uid, 'system', 'infinite_scroll', 0);
-		$enable_smart_threading = !$this->pConfig->get($uid, 'system', 'no_smart_threading', 0);
-		$enable_dislike         = !$this->pConfig->get($uid, 'system', 'hide_dislike', 0);
-		$display_resharer       =  $this->pConfig->get($uid, 'system', 'display_resharer', 0);
-		$stay_local             =  $this->pConfig->get($uid, 'system', 'stay_local', 0);
+		$enable_smile           = !$this->pConfig->get($uid, 'system', 'no_smilies', false);
+		$infinite_scroll        =  $this->pConfig->get($uid, 'system', 'infinite_scroll', false);
+		$enable_smart_threading = !$this->pConfig->get($uid, 'system', 'no_smart_threading', false);
+		$enable_dislike         = !$this->pConfig->get($uid, 'system', 'hide_dislike', false);
+		$display_resharer       =  $this->pConfig->get($uid, 'system', 'display_resharer', false);
+		$stay_local             =  $this->pConfig->get($uid, 'system', 'stay_local', false);
+		$show_page_drop         =  $this->pConfig->get($uid, 'system', 'show_page_drop', true);
+		$display_eventlist      =  $this->pConfig->get($uid, 'system', 'display_eventlist', true);
 
 		$preview_mode  =  $this->pConfig->get($uid, 'system', 'preview_mode', BBCode::PREVIEW_LARGE);
 		$preview_modes = [
@@ -218,8 +263,22 @@ class Display extends BaseSettings
 			BBCode::PREVIEW_LARGE    => $this->t('Large Image'),
 		];
 
+		$bookmarked_timelines = $this->pConfig->get($uid, 'system', 'network_timelines', $this->getAvailableTimelines($uid, true)->column('code'));
+		$enabled_timelines    = $this->pConfig->get($uid, 'system', 'enabled_timelines', $this->getAvailableTimelines($uid, false)->column('code'));
+		$channel_languages = User::getWantedLanguages($uid);
+		$languages         = $this->l10n->getLanguageCodes(true);
 
-		$first_day_of_week = $this->pConfig->get($uid, 'system', 'first_day_of_week', 0);
+		$timelines = [];
+		foreach ($this->getAvailableTimelines($uid) as $timeline) {
+			$timelines[] = [
+				'label'        => $timeline->label,
+				'description'  => $timeline->description,
+				'enable'       => ["enable[{$timeline->code}]", '', in_array($timeline->code, $enabled_timelines)],
+				'bookmark'     => ["bookmark[{$timeline->code}]", '', in_array($timeline->code, $bookmarked_timelines)],
+			];
+		}
+
+		$first_day_of_week = $this->pConfig->get($uid, 'calendar', 'first_day_of_week', 0);
 		$weekdays          = [
 			0 => $this->t('Sunday'),
 			1 => $this->t('Monday'),
@@ -252,10 +311,11 @@ class Display extends BaseSettings
 			'$d_ctset'        => $this->t('Custom Theme Settings'),
 			'$d_cset'         => $this->t('Content Settings'),
 			'$stitle'         => $this->t('Theme settings'),
+			'$timeline_title' => $this->t('Timelines'),
+			'$channel_title'  => $this->t('Channels'),
 			'$calendar_title' => $this->t('Calendar'),
 
 			'$form_security_token' => self::getFormSecurityToken('settings_display'),
-			'$baseurl'             => $this->baseUrl->get(true),
 			'$uid'                 => $uid,
 
 			'$theme'	    => ['theme', $this->t('Display Theme:'), $theme_selected, '', $themes, true],
@@ -265,17 +325,54 @@ class Display extends BaseSettings
 			'$itemspage_network'        => ['itemspage_network'       , $this->t('Number of items to display per page:'), $itemspage_network, $this->t('Maximum of 100 items')],
 			'$itemspage_mobile_network' => ['itemspage_mobile_network', $this->t('Number of items to display per page when viewed from mobile device:'), $itemspage_mobile_network, $this->t('Maximum of 100 items')],
 			'$ajaxint'                  => ['browser_update'          , $this->t('Update browser every xx seconds'), $browser_update, $this->t('Minimum of 10 seconds. Enter -1 to disable it.')],
-			'$no_auto_update'           => ['no_auto_update'          , $this->t('Automatic updates only at the top of the post stream pages'), $no_auto_update, $this->t('Auto update may add new posts at the top of the post stream pages, which can affect the scroll position and perturb normal reading if it happens anywhere else the top of the page.')],
 			'$enable_smile'	            => ['enable_smile'            , $this->t('Display emoticons'), $enable_smile, $this->t('When enabled, emoticons are replaced with matching symbols.')],
 			'$infinite_scroll'          => ['infinite_scroll'         , $this->t('Infinite scroll'), $infinite_scroll, $this->t('Automatic fetch new items when reaching the page end.')],
 			'$enable_smart_threading'   => ['enable_smart_threading'  , $this->t('Enable Smart Threading'), $enable_smart_threading, $this->t('Enable the automatic suppression of extraneous thread indentation.')],
 			'$enable_dislike'           => ['enable_dislike'          , $this->t('Display the Dislike feature'), $enable_dislike, $this->t('Display the Dislike button and dislike reactions on posts and comments.')],
 			'$display_resharer'         => ['display_resharer'        , $this->t('Display the resharer'), $display_resharer, $this->t('Display the first resharer as icon and text on a reshared item.')],
 			'$stay_local'               => ['stay_local'              , $this->t('Stay local'), $stay_local, $this->t("Don't go to a remote system when following a contact link.")],
+			'$show_page_drop'           => ['show_page_drop'          , $this->t('Show the post deletion checkbox'), $show_page_drop, $this->t("Display the checkbox for the post deletion on the network page.")],
+			'$display_eventlist'        => ['display_eventlist'       , $this->t('DIsplay the event list'), $display_eventlist, $this->t("Display the birthday reminder and event list on the network page.")],
 			'$preview_mode'             => ['preview_mode'            , $this->t('Link preview mode'), $preview_mode, $this->t('Appearance of the link preview that is added to each post with a link.'), $preview_modes, false],
+
+			'$timeline_label'       => $this->t('Label'),
+			'$timeline_descriptiom' => $this->t('Description'),
+			'$timeline_enable'      => $this->t('Enable'),
+			'$timeline_bookmark'    => $this->t('Bookmark'),
+			'$timelines'            => $timelines,
+			'$timeline_explanation' => $this->t('Enable timelines that you want to see in the channels widget. Bookmark timelines that you want to see in the top menu.'),
+
+			'$channel_languages' => ['channel_languages[]', $this->t('Channel languages:'), $channel_languages, $this->t('Select all languages that you want to see in your channels.'), $languages, 'multiple'],
 
 			'$first_day_of_week'     => ['first_day_of_week'    , $this->t('Beginning of week:')    , $first_day_of_week    , '', $weekdays     , false],
 			'$calendar_default_view' => ['calendar_default_view', $this->t('Default calendar view:'), $calendar_default_view, '', $calendarViews, false],
 		]);
+	}
+
+	private function getAvailableTimelines(int $uid, bool $only_network = false): Timelines
+	{
+		$timelines = [];
+
+		foreach ($this->network->getTimelines('') as $channel) {
+			$timelines[] = $channel;
+		}
+
+		if ($only_network) {
+			return new Timelines($timelines);
+		}
+
+		foreach ($this->channel->getTimelines($uid) as $channel) {
+			$timelines[] = $channel;
+		}
+
+		foreach ($this->userDefinedChannel->selectByUid($uid) as $channel) {
+			$timelines[] = $channel;
+		}
+
+		foreach ($this->community->getTimelines(true) as $community) {
+			$timelines[] = $community;
+		}
+
+		return new Timelines($timelines);
 	}
 }

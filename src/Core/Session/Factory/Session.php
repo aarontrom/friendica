@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,8 +22,8 @@
 namespace Friendica\Core\Session\Factory;
 
 use Friendica\App;
-use Friendica\Core\Cache\Enum;
 use Friendica\Core\Cache\Factory\Cache;
+use Friendica\Core\Cache\Type\DatabaseCache;
 use Friendica\Core\Config\Capability\IManageConfigValues;
 use Friendica\Core\Session\Capability\IHandleSessions;
 use Friendica\Core\Session\Type;
@@ -55,19 +55,17 @@ class Session
 	 * @param LoggerInterface     $logger
 	 * @param Profiler            $profiler
 	 * @param array               $server
+	 * @return IHandleSessions
 	 */
-	public function createSession(App\Mode $mode, App\BaseURL $baseURL, IManageConfigValues $config, Database $dba, Cache $cacheFactory, LoggerInterface $logger, Profiler $profiler, array $server = []): IHandleSessions
+	public function create(App\Mode $mode, App\BaseURL $baseURL, IManageConfigValues $config, Database $dba, Cache $cacheFactory, LoggerInterface $logger, Profiler $profiler, array $server = []): IHandleSessions
 	{
 		$profiler->startRecording('session');
-		$session = null;
+		$session_handler = $config->get('system', 'session_handler', self::HANDLER_DEFAULT);
 
 		try {
 			if ($mode->isInstall() || $mode->isBackend()) {
 				$session = new Type\Memory();
 			} else {
-				$session_handler = $config->get('system', 'session_handler', self::HANDLER_DEFAULT);
-				$handler         = null;
-
 				switch ($session_handler) {
 					case self::HANDLER_DATABASE:
 						$handler = new Handler\Database($dba, $logger, $server);
@@ -76,16 +74,21 @@ class Session
 						$cache = $cacheFactory->createDistributed();
 
 						// In case we're using the db as cache driver, use the native db session, not the cache
-						if ($config->get('system', 'cache_driver') === Enum\Type::DATABASE) {
+						if ($config->get('system', 'cache_driver') === DatabaseCache::NAME) {
 							$handler = new Handler\Database($dba, $logger, $server);
 						} else {
 							$handler = new Handler\Cache($cache, $logger);
 						}
 						break;
+					default:
+						$handler = null;
 				}
 
 				$session = new Type\Native($baseURL, $handler);
 			}
+		} catch (\Throwable $e) {
+			$logger->notice('Unable to create session', ['mode' => $mode, 'session_handler' => $session_handler, 'exception' => $e]);
+			$session = new Type\Memory();
 		} finally {
 			$profiler->stopRecording();
 			return $session;

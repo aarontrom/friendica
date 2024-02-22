@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -58,11 +58,12 @@ class PubSub extends \Friendica\BaseModule
 
 		$this->logger->info('Feed arrived.', ['from' =>  $this->request->getRemoteAddress(), 'for' => $this->args->getCommand(), 'user-agent' => $this->server['HTTP_USER_AGENT']]);
 		$this->logger->debug('Data stream.', ['xml' => $xml]);
+		$this->logger->debug('Got request data.', ['request' => $request]);
 
 		$nickname   = $this->parameters['nickname'] ?? '';
 		$contact_id = $this->parameters['cid']      ?? 0;
 
-		$importer = $this->database->selectFirst('user', [], ['nickname' => $nickname, 'account_expired' => false, 'account_removed' => false]);
+		$importer = $this->database->selectFirst('user', [], ['nickname' => $nickname, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]);
 		if (!$importer) {
 			throw new HTTPException\OKException();
 		}
@@ -118,7 +119,7 @@ class PubSub extends \Friendica\BaseModule
 		$this->logger->notice('Subscription start.', ['from' => $this->request->getRemoteAddress(), 'mode' => $hub_mode, 'nickname' => $nickname]);
 		$this->logger->debug('Data: ', ['get' => $request]);
 
-		$owner = $this->database->selectFirst('user', ['uid'], ['nickname' => $nickname, 'account_expired' => false, 'account_removed' => false]);
+		$owner = $this->database->selectFirst('user', ['uid'], ['nickname' => $nickname, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]);
 		if (!$owner) {
 			$this->logger->notice('Local account not found.', ['nickname' => $nickname]);
 			throw new HTTPException\NotFoundException();
@@ -154,6 +155,6 @@ class PubSub extends \Friendica\BaseModule
 			$this->logger->notice('Success for contact.', ['mode' => $hub_mode, 'contact' => $contact_id]);
 		}
 
-		System::httpExit($hub_challenge);
+		$this->httpExit($hub_challenge);
 	}
 }

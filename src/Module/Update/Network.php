@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,62 +21,35 @@
 
 namespace Friendica\Module\Update;
 
+use Friendica\Content\Conversation;
 use Friendica\Core\System;
-use Friendica\DI;
-use Friendica\Model\Item;
-use Friendica\Model\Post;
 use Friendica\Module\Conversation\Network as NetworkModule;
 
 class Network extends NetworkModule
 {
 	protected function rawContent(array $request = [])
 	{
-		if (!isset($_GET['p']) || !isset($_GET['item'])) {
+		if (!isset($request['p']) || !isset($request['item'])) {
 			System::exit();
 		}
 
-		$this->parseRequest($_GET);
-
-		$profile_uid = intval($_GET['p']);
+		$this->parseRequest($request);
 
 		$o = '';
 
-		if (!DI::pConfig()->get($profile_uid, 'system', 'no_auto_update') || ($_GET['force'] == 1)) {
-			if (!empty($_GET['item'])) {
-				$item = Post::selectFirst(['parent'], ['id' => $_GET['item']]);
-				$parent = $item['parent'] ?? 0;
-			} else {
-				$parent = 0;
-			}
-
-			$conditionFields = [];
-			if (!empty($parent)) {
-				// Load only a single thread
-				$conditionFields['parent'] = $parent;
-			} elseif (self::$order === 'received') {
-				// Only load new toplevel posts
-				$conditionFields['unseen'] = true;
-				$conditionFields['gravity'] = Item::GRAVITY_PARENT;
-			} else {
-				// Load all unseen items
-				$conditionFields['unseen'] = true;
-			}
-
-			$params = ['limit' => 100];
-			$table = 'network-item-view';
-
-			$items = self::getItems($table, $params, $conditionFields);
-
-			if (self::$order === 'received') {
-				$ordering = '`received`';
-			} elseif (self::$order === 'created') {
-				$ordering = '`created`';
-			} else {
-				$ordering = '`commented`';
-			}
-
-			$o = DI::conversation()->create($items, 'network', $profile_uid, false, $ordering, DI::userSession()->getLocalUserId());
+		if (!$this->update && !$this->force) {
+			System::htmlUpdateExit($o);
 		}
+
+		if ($this->channel->isTimeline($this->selectedTab) || $this->userDefinedChannel->isTimeline($this->selectedTab, $this->session->getLocalUserId())) {
+			$items = $this->getChannelItems();
+		} elseif ($this->community->isTimeline($this->selectedTab)) {
+			$items = $this->getCommunityItems();
+		} else {
+			$items = $this->getItems();
+		}
+
+		$o = $this->conversation->render($items, Conversation::MODE_NETWORK, true, false, $this->getOrder(), $this->session->getLocalUserId());
 
 		System::htmlUpdateExit($o);
 	}

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,7 +21,7 @@
 
 namespace Friendica\Database;
 
-use Friendica\Core\Config\ValueObject\Cache;
+use Friendica\Core\Config\Capability\IManageConfigValues;
 use Friendica\Core\System;
 use Friendica\Database\Definition\DbaDefinition;
 use Friendica\Database\Definition\ViewDefinition;
@@ -53,17 +53,17 @@ class Database
 	protected $connected = false;
 
 	/**
-	 * @var \Friendica\Core\Config\ValueObject\Cache
+	 * @var IManageConfigValues
 	 */
-	protected $configCache;
+	protected $config = null;
 	/**
 	 * @var Profiler
 	 */
-	protected $profiler;
+	protected $profiler = null;
 	/**
 	 * @var LoggerInterface
 	 */
-	protected $logger;
+	protected $logger = null;
 	protected $server_info = '';
 	/** @var PDO|mysqli */
 	protected $connection;
@@ -80,19 +80,37 @@ class Database
 	protected $dbaDefinition;
 	/** @var ViewDefinition */
 	protected $viewDefinition;
+	/** @var string|null */
+	private $currentTable;
 
-	public function __construct(Cache $configCache, Profiler $profiler, DbaDefinition $dbaDefinition, ViewDefinition $viewDefinition)
+	public function __construct(IManageConfigValues $config, DbaDefinition $dbaDefinition, ViewDefinition $viewDefinition)
 	{
 		// We are storing these values for being able to perform a reconnect
-		$this->configCache    = $configCache;
-		$this->profiler       = $profiler;
+		$this->config         = $config;
 		$this->dbaDefinition  = $dbaDefinition;
 		$this->viewDefinition = $viewDefinition;
 
-		// Temporary NullLogger until we can fetch the logger class from the config
+		// Use dummy values - necessary for the first factory call of the logger itself
 		$this->logger = new NullLogger();
+		$this->profiler = new Profiler($config);
 
 		$this->connect();
+	}
+
+	/**
+	 * @param IManageConfigValues $config
+	 * @param Profiler            $profiler
+	 * @param LoggerInterface     $logger
+	 *
+	 * @return void
+	 *
+	 * @todo Make this method obsolete - use a clean pattern instead ...
+	 */
+	public function setDependency(IManageConfigValues $config, Profiler $profiler, LoggerInterface $logger)
+	{
+		$this->logger   = $logger;
+		$this->profiler = $profiler;
+		$this->config   = $config;
 	}
 
 	/**
@@ -110,32 +128,32 @@ class Database
 		$this->connected = false;
 
 		$port       = 0;
-		$serveraddr = trim($this->configCache->get('database', 'hostname') ?? '');
+		$serveraddr = trim($this->config->get('database', 'hostname') ?? '');
 		$serverdata = explode(':', $serveraddr);
 		$host       = trim($serverdata[0]);
 		if (count($serverdata) > 1) {
 			$port = trim($serverdata[1]);
 		}
 
-		if (trim($this->configCache->get('database', 'port') ?? 0)) {
-			$port = trim($this->configCache->get('database', 'port') ?? 0);
+		if (trim($this->config->get('database', 'port') ?? 0)) {
+			$port = trim($this->config->get('database', 'port') ?? 0);
 		}
 
-		$user     = trim($this->configCache->get('database', 'username'));
-		$pass     = trim($this->configCache->get('database', 'password'));
-		$database = trim($this->configCache->get('database', 'database'));
-		$charset  = trim($this->configCache->get('database', 'charset'));
-		$socket   = trim($this->configCache->get('database', 'socket'));
+		$user     = trim($this->config->get('database', 'username'));
+		$pass     = trim($this->config->get('database', 'password'));
+		$database = trim($this->config->get('database', 'database'));
+		$charset  = trim($this->config->get('database', 'charset'));
+		$socket   = trim($this->config->get('database', 'socket'));
 
 		if (!$host && !$socket || !$user) {
 			return false;
 		}
 
-		$persistent = (bool)$this->configCache->get('database', 'persistent');
+		$persistent = (bool)$this->config->get('database', 'persistent');
 
-		$this->pdo_emulate_prepares = (bool)$this->configCache->get('database', 'pdo_emulate_prepares');
+		$this->pdo_emulate_prepares = (bool)$this->config->get('database', 'pdo_emulate_prepares');
 
-		if (!$this->configCache->get('database', 'disable_pdo') && class_exists('\PDO') && in_array('mysql', PDO::getAvailableDrivers())) {
+		if (!$this->config->get('database', 'disable_pdo') && class_exists('\PDO') && in_array('mysql', PDO::getAvailableDrivers())) {
 			$this->driver = self::PDO;
 			if ($socket) {
 				$connect = 'mysql:unix_socket=' . $socket;
@@ -194,21 +212,6 @@ class Database
 	public function setTestmode(bool $test)
 	{
 		$this->testmode = $test;
-	}
-
-	/**
-	 * Sets the logger for DBA
-	 *
-	 * @note this is necessary because if we want to load the logger configuration
-	 *       from the DB, but there's an error, we would print out an exception.
-	 *       So the logger gets updated after the logger configuration can be retrieved
-	 *       from the database
-	 *
-	 * @param LoggerInterface $logger
-	 */
-	public function setLogger(LoggerInterface $logger)
-	{
-		$this->logger = $logger;
 	}
 
 	/**
@@ -317,7 +320,7 @@ class Database
 	private function logIndex(string $query)
 	{
 
-		if (!$this->configCache->get('system', 'db_log_index')) {
+		if (!$this->config->get('system', 'db_log_index')) {
 			return;
 		}
 
@@ -336,18 +339,18 @@ class Database
 			return;
 		}
 
-		$watchlist = explode(',', $this->configCache->get('system', 'db_log_index_watch'));
-		$denylist  = explode(',', $this->configCache->get('system', 'db_log_index_denylist'));
+		$watchlist = explode(',', $this->config->get('system', 'db_log_index_watch'));
+		$denylist  = explode(',', $this->config->get('system', 'db_log_index_denylist'));
 
 		while ($row = $this->fetch($r)) {
-			if ((intval($this->configCache->get('system', 'db_loglimit_index')) > 0)) {
+			if ((intval($this->config->get('system', 'db_loglimit_index')) > 0)) {
 				$log = (in_array($row['key'], $watchlist) &&
-					($row['rows'] >= intval($this->configCache->get('system', 'db_loglimit_index'))));
+					($row['rows'] >= intval($this->config->get('system', 'db_loglimit_index'))));
 			} else {
 				$log = false;
 			}
 
-			if ((intval($this->configCache->get('system', 'db_loglimit_index_high')) > 0) && ($row['rows'] >= intval($this->configCache->get('system', 'db_loglimit_index_high')))) {
+			if ((intval($this->config->get('system', 'db_loglimit_index_high')) > 0) && ($row['rows'] >= intval($this->config->get('system', 'db_loglimit_index_high')))) {
 				$log = true;
 			}
 
@@ -358,7 +361,7 @@ class Database
 			if ($log) {
 				$backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
 				@file_put_contents(
-					$this->configCache->get('system', 'db_log_index'),
+					$this->config->get('system', 'db_log_index'),
 					DateTimeFormat::utcNow() . "\t" .
 					$row['key'] . "\t" . $row['rows'] . "\t" . $row['Extra'] . "\t" .
 					basename($backtrace[1]["file"]) . "\t" .
@@ -502,7 +505,7 @@ class Database
 	 */
 	public function p(string $sql)
 	{
-
+		$this->currentTable = null;
 		$this->profiler->startRecording('database');
 		$stamp1 = microtime(true);
 
@@ -525,7 +528,7 @@ class Database
 
 		if ((substr_count($sql, '?') != count($args)) && (count($args) > 0)) {
 			// Question: Should we continue or stop the query here?
-			$this->logger->warning('Query parameters mismatch.', ['query' => $sql, 'args' => $args, 'callstack' => System::callstack()]);
+			$this->logger->warning('Query parameters mismatch.', ['query' => $sql, 'args' => $args]);
 		}
 
 		$sql = DBA::cleanQuery($sql);
@@ -533,7 +536,7 @@ class Database
 
 		$orig_sql = $sql;
 
-		if ($this->configCache->get('system', 'db_callstack') !== null) {
+		if ($this->config->get('system', 'db_callstack') !== null) {
 			$sql = "/*" . System::callstack() . " */ " . $sql;
 		}
 
@@ -699,7 +702,6 @@ class Database
 			$this->logger->error('DB Error', [
 				'code'      => $errorno,
 				'error'     => $error,
-				'callstack' => System::callstack(8),
 				'params'    => $this->replaceParameters($sql, $args),
 			]);
 
@@ -738,19 +740,19 @@ class Database
 
 		$this->profiler->stopRecording();
 
-		if ($this->configCache->get('system', 'db_log')) {
+		if ($this->config->get('system', 'db_log')) {
 			$stamp2   = microtime(true);
 			$duration = (float)($stamp2 - $stamp1);
 
-			if (($duration > $this->configCache->get('system', 'db_loglimit'))) {
+			if (($duration > $this->config->get('system', 'db_loglimit'))) {
 				$duration  = round($duration, 3);
 				$backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
 
 				@file_put_contents(
-					$this->configCache->get('system', 'db_log'),
+					$this->config->get('system', 'db_log'),
 					DateTimeFormat::utcNow() . "\t" . $duration . "\t" .
-					basename($backtrace[1]["file"]) . "\t" .
-					$backtrace[1]["line"] . "\t" . $backtrace[2]["function"] . "\t" .
+					basename($backtrace[1]['file']) . "\t" .
+					$backtrace[1]['line'] . "\t" . $backtrace[2]['function'] . "\t" .
 					substr($this->replaceParameters($sql, $args), 0, 4000) . "\n",
 					FILE_APPEND
 				);
@@ -766,7 +768,7 @@ class Database
 	 *
 	 * @param string $sql SQL statement
 	 *
-	 * @return boolean Was the query successfull? False is returned only if an error occurred
+	 * @return boolean Was the query successful? False is returned only if an error occurred
 	 * @throws \Exception
 	 */
 	public function e(string $sql): bool
@@ -807,7 +809,6 @@ class Database
 			$this->logger->error('DB Error', [
 				'code'      => $errorno,
 				'error'     => $error,
-				'callstack' => System::callstack(8),
 				'params'    => $this->replaceParameters($sql, $params),
 			]);
 
@@ -972,8 +973,8 @@ class Database
 		switch ($this->driver) {
 			case self::PDO:
 				$columns = $stmt->fetch(PDO::FETCH_ASSOC);
-				if (!empty($stmt->table) && is_array($columns)) {
-					$columns = $this->castFields($stmt->table, $columns);
+				if (!empty($this->currentTable) && is_array($columns)) {
+					$columns = $this->castFields($this->currentTable, $columns);
 				}
 				break;
 			case self::MYSQLI:
@@ -1289,7 +1290,7 @@ class Database
 		$condition_string = DBA::buildCondition($conditions);
 
 		$sql = "DELETE FROM " . $table_string . " " . $condition_string;
-		$this->logger->debug($this->replaceParameters($sql, $conditions), ['callstack' => System::callstack(6)]);
+		$this->logger->debug($this->replaceParameters($sql, $conditions));
 		return $this->e($sql, $conditions);
 	}
 
@@ -1320,7 +1321,7 @@ class Database
 	 * @param array|boolean $old_fields array with the old field values that are about to be replaced (true = update on duplicate, false = don't update identical fields)
 	 * @param array         $params     Parameters: "ignore" If set to "true" then the update is done with the ignore parameter
 	 *
-	 * @return boolean was the update successfull?
+	 * @return boolean was the update successful?
 	 * @throws \Exception
 	 * @todo Implement "bool $update_on_duplicate" to avoid mixed type for $old_fields
 	 */
@@ -1356,6 +1357,15 @@ class Database
 		}
 
 		$fields = $this->castFields($table, $fields);
+		$direct_fields = [];
+
+		foreach ($fields as $key => $value) {
+			if (is_numeric($key)) {
+				$direct_fields[] = $value;
+				unset($fields[$key]);
+			}
+		}
+
 
 		$table_string = DBA::buildTableString([$table]);
 
@@ -1368,7 +1378,8 @@ class Database
 		}
 
 		$sql = "UPDATE " . $ignore . $table_string . " SET "
-			. implode(" = ?, ", array_map([DBA::class, 'quoteIdentifier'], array_keys($fields))) . " = ?"
+			. ((count($fields) > 0) ? implode(" = ?, ", array_map([DBA::class, 'quoteIdentifier'], array_keys($fields))) . " = ?" : "")
+			. ((count($direct_fields) > 0) ? ((count($fields) > 0) ? " , " : "") . implode(" , ", $direct_fields) : "")
 			. $condition_string;
 
 		// Combines the updated fields parameter values with the condition parameter values
@@ -1509,8 +1520,8 @@ class Database
 
 		$result = $this->p($sql, $condition);
 
-		if (($this->driver == self::PDO) && !empty($result) && is_string($table)) {
-			$result->table = $table;
+		if ($this->driver == self::PDO && !empty($result)) {
+			$this->currentTable = $table;
 		}
 
 		return $result;
@@ -1755,6 +1766,37 @@ class Database
 			$statelist .= $state . ': ' . $usage;
 		}
 		return (['list' => $statelist, 'amount' => $processes]);
+	}
+
+	/**
+	 * Optimizes tables
+	 *
+	 * @param string $table a given table
+	 *
+	 * @return bool True, if successfully optimized, otherwise false
+	 * @throws \Exception
+	 */
+	public function optimizeTable(string $table): bool
+	{
+		return $this->e("OPTIMIZE TABLE " . DBA::buildTableString([$table])) !== false;
+	}
+
+	/**
+	 * Kill sleeping database processes
+	 *
+	 * @return void
+	 */
+	public function deleteSleepingProcesses()
+	{
+		$processes = $this->p("SHOW FULL PROCESSLIST");
+		while ($process = $this->fetch($processes)) {
+			if (($process['Command'] != 'Sleep') || ($process['Time'] < 300) || ($process['db'] != $this->databaseName())) {
+				continue;
+			}
+
+			$this->e("KILL ?", $process['Id']);
+		}
+		$this->close($processes);
 	}
 
 	/**

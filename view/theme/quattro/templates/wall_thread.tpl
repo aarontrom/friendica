@@ -149,7 +149,7 @@
 					<input type="checkbox" title="{{$item.drop.select}}" name="itemselected[]" class="item-select" value="{{$item.id}}" />
 				{{/if}}
 				{{if $item.drop && $item.drop.dropping}}
-					<a href="item/drop/{{$item.id}}/{{$item.return}}" onclick="return confirmDelete();" class="icon delete s16" title="{{$item.drop.delete}}">{{$item.drop.delete}}</a>
+					<a href="item/drop/{{$item.id}}/{{$item.return}}" onclick="return confirmDelete();" class="icon delete s16" title="{{$item.drop.label}}">{{$item.drop.label}}</a>
 				{{/if}}
 				{{if $item.edpost}}
 					<a class="icon edit s16" href="{{$item.edpost.0}}" title="{{$item.edpost.1}}"></a>
@@ -160,7 +160,11 @@
 	</div>
 	<div class="wall-item-bottom">
 		<div class="wall-item-links"></div>
-		{{if $item.responses}}
+		{{if $item.emojis}}
+			{{foreach $item.emojis as $emoji}}
+				<span class="wall-item-emoji" title="{{$emoji.title}}">{{$emoji.emoji}} {{$emoji.total}}</span>
+			{{/foreach}}
+		{{elseif $item.responses}}
 			{{foreach $item.responses as $verb=>$response}}
 				<div class="wall-item-{{$verb}}" id="wall-item-{{$verb}}-{{$item.id}}">{{$response.output nofilter}}</div>
 			{{/foreach}}

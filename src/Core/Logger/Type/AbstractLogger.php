@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,8 +21,8 @@
 
 namespace Friendica\Core\Logger\Type;
 
+use Friendica\Core\Logger\Capability\IHaveCallIntrospections;
 use Friendica\Core\Logger\Exception\LoggerException;
-use Friendica\Core\Logger\Util\Introspection;
 use Friendica\Util\Strings;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
@@ -38,6 +38,8 @@ use Psr\Log\LogLevel;
  */
 abstract class AbstractLogger implements LoggerInterface
 {
+	const NAME = '';
+
 	/**
 	 * The output channel of this logger
 	 * @var string
@@ -46,7 +48,7 @@ abstract class AbstractLogger implements LoggerInterface
 
 	/**
 	 * The Introspection for the current call
-	 * @var Introspection
+	 * @var IHaveCallIntrospections
 	 */
 	protected $introspection;
 
@@ -69,11 +71,11 @@ abstract class AbstractLogger implements LoggerInterface
 
 	/**
 	 * @param string        $channel       The output channel
-	 * @param Introspection $introspection The introspection of the current call
+	 * @param IHaveCallIntrospections $introspection The introspection of the current call
 	 *
 	 * @throws LoggerException
 	 */
-	public function __construct(string $channel, Introspection $introspection)
+	public function __construct(string $channel, IHaveCallIntrospections $introspection)
 	{
 		$this->channel       = $channel;
 		$this->introspection = $introspection;

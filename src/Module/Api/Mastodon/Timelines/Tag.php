@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,6 +21,7 @@
 
 namespace Friendica\Module\Api\Mastodon\Timelines;
 
+use Friendica\Core\Logger;
 use Friendica\Core\Protocol;
 use Friendica\Core\System;
 use Friendica\Database\DBA;
@@ -40,17 +41,17 @@ class Tag extends BaseApi
 	 */
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = self::getCurrentUserID();
 
 		if (empty($this->parameters['hashtag'])) {
-			DI::mstdnError()->UnprocessableEntity();
+			$this->logAndJsonError(422, $this->errorFactory->UnprocessableEntity());
 		}
 
 		/**
 		 * @todo Respect missing parameters
 		 * @see https://github.com/tootsuite/mastodon/blob/main/app/controllers/api/v1/timelines/tag_controller.rb
-		 * 
+		 *
 		 * There seem to be the parameters "any", "all", and "none".
 		 */
 
@@ -103,12 +104,25 @@ class Tag extends BaseApi
 			$params['order'] = ['uri-id'];
 		}
 
+		if (!empty($uid)) {
+			$condition = DBA::mergeConditions(
+				$condition,
+				["NOT `author-id` IN (SELECT `cid` FROM `user-contact` WHERE `uid` = ? AND (`blocked` OR `ignored`) AND `cid` = `author-id`)", $uid]
+			);
+		}
+
 		$items = DBA::select('tag-search-view', ['uri-id'], $condition, $params);
+
+		$display_quotes = self::appSupportsQuotes();
 
 		$statuses = [];
 		while ($item = Post::fetch($items)) {
 			self::setBoundaries($item['uri-id']);
-			$statuses[] = DI::mstdnStatus()->createFromUriId($item['uri-id'], $uid);
+			try {
+				$statuses[] = DI::mstdnStatus()->createFromUriId($item['uri-id'], $uid, $display_quotes);
+			} catch (\Exception $exception) {
+				Logger::info('Post not fetchable', ['uri-id' => $item['uri-id'], 'uid' => $uid, 'exception' => $exception]);
+			}
 		}
 		DBA::close($items);
 
@@ -117,6 +131,6 @@ class Tag extends BaseApi
 		}
 
 		self::setLinkHeader();
-		System::jsonExit($statuses);
+		$this->jsonExit($statuses);
 	}
 }

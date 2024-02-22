@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -229,7 +229,12 @@ class Images
 		}
 
 		if (empty($img_str)) {
-			$img_str = DI::httpClient()->fetch($url, HttpClientAccept::IMAGE, 4);
+			try {
+				$img_str = DI::httpClient()->fetch($url, HttpClientAccept::IMAGE, 4);
+			} catch (\Exception $exception) {
+				Logger::notice('Image is invalid', ['url' => $url, 'exception' => $exception]);
+				return [];
+			}
 		}
 
 		if (!$img_str) {
@@ -244,17 +249,19 @@ class Images
 			return [];
 		}
 
-		if ($data) {
-			$image = new Image($img_str);
-
-			if ($image->isValid()) {
-				$data['blurhash'] = $image->getBlurHash();
-			}
-
-			$data['size'] = $filesize;
+		if (!$data) {
+			return [];
 		}
 
-		return is_array($data) ? $data : [];
+		$image = new Image($img_str);
+
+		if ($image->isValid()) {
+			$data['blurhash'] = $image->getBlurHash();
+		}
+
+		$data['size'] = $filesize;
+
+		return $data;
 	}
 
 	/**
@@ -310,5 +317,52 @@ class Images
 		}
 
 		return ['width' => $dest_width, 'height' => $dest_height];
+	}
+
+	/**
+	 * Get a BBCode tag for an local photo page URL with a preview thumbnail and an image description
+	 *
+	 * @param string $resource_id
+	 * @param string $nickname The local user owner of the resource
+	 * @param int    $preview Preview image size identifier, either 0, 1 or 2 in decreasing order of size
+	 * @param string $ext Image file extension
+	 * @param string $description
+	 * @return string
+	 */
+	public static function getBBCodeByResource(string $resource_id, string $nickname, int $preview, string $ext, string $description = ''): string
+	{
+		return self::getBBCodeByUrl(
+			DI::baseUrl() . '/photos/' . $nickname . '/image/' . $resource_id,
+			DI::baseUrl() . '/photo/' . $resource_id . '-' . $preview. '.' . $ext,
+			$description
+		);
+	}
+
+	/**
+	 * Get a BBCode tag for an image URL with a preview thumbnail and an image description
+	 *
+	 * @param string $photo Full image URL
+	 * @param string $preview Preview image URL
+	 * @param string $description
+	 * @return string
+	 */
+	public static function getBBCodeByUrl(string $photo, string $preview = null, string $description = ''): string
+	{
+		if (!empty($preview)) {
+			return '[url=' . $photo . '][img=' . $preview . ']' . $description . '[/img][/url]';
+		}
+
+		return '[img=' . $photo . ']' . $description . '[/img]';
+	}
+
+	/**
+	 * Get the maximum possible upload size in bytes
+	 *
+	 * @return integer
+	 */
+	public static function getMaxUploadBytes(): int
+	{
+		$upload_size = ini_get('upload_max_filesize') ?: DI::config()->get('system', 'maximagesize');
+		return Strings::getBytesFromShorthand($upload_size);
 	}
 }

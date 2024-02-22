@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -35,17 +35,18 @@ use Friendica\Core\System;
 use Friendica\Core\Worker;
 use Friendica\Database\DBA;
 use Friendica\DI;
+use Friendica\Module;
 use Friendica\Network\HTTPClient\Client\HttpClientAccept;
-use Friendica\Security\TwoFactor\Model\AppSpecificPassword;
 use Friendica\Network\HTTPException;
 use Friendica\Object\Image;
+use Friendica\Protocol\Delivery;
+use Friendica\Security\TwoFactor\Model\AppSpecificPassword;
 use Friendica\Util\Crypto;
 use Friendica\Util\DateTimeFormat;
 use Friendica\Util\Images;
 use Friendica\Util\Network;
 use Friendica\Util\Proxy;
 use Friendica\Util\Strings;
-use Friendica\Worker\Delivery;
 use ImagickException;
 use LightOpenID;
 
@@ -87,7 +88,7 @@ class User
 	 * ACCOUNT_TYPE_NEWS - the account is a news reflector
 	 *	Associated page type: PAGE_FLAGS_SOAPBOX
 	 *
-	 * ACCOUNT_TYPE_COMMUNITY - the account is community forum
+	 * ACCOUNT_TYPE_COMMUNITY - the account is community group
 	 *	Associated page types: PAGE_COMMUNITY, PAGE_FLAGS_PRVGROUP
 	 *
 	 * ACCOUNT_TYPE_RELAY - the account is a relay
@@ -126,9 +127,19 @@ class User
 
 			case 'community':
 				return User::ACCOUNT_TYPE_COMMUNITY;
-
 		}
 		return null;
+	}
+
+	/**
+	 * Get the Uri-Id of the system account
+	 *
+	 * @return integer
+	 */
+	public static function getSystemUriId(): int
+	{
+		$system = self::getSystemAccount();
+		return $system['uri-id'] ?? 0;
 	}
 
 	/**
@@ -166,11 +177,11 @@ class User
 		$system['region'] = '';
 		$system['postal-code'] = '';
 		$system['country-name'] = '';
-		$system['homepage'] = DI::baseUrl()->get();
+		$system['homepage'] = (string)DI::baseUrl();
 		$system['dob'] = '0000-00-00';
 
 		// Ensure that the user contains data
-		$user = DBA::selectFirst('user', ['prvkey', 'guid'], ['uid' => 0]);
+		$user = DBA::selectFirst('user', ['prvkey', 'guid', 'language'], ['uid' => 0]);
 		if (empty($user['prvkey']) || empty($user['guid'])) {
 			$fields = [
 				'username' => $system['name'],
@@ -190,7 +201,8 @@ class User
 
 			$system['guid'] = $fields['guid'];
 		} else {
-			$system['guid'] = $user['guid'];
+			$system['guid']     = $user['guid'];
+			$system['language'] = $user['language'];
 		}
 
 		return $system;
@@ -219,7 +231,7 @@ class User
 			'self'         => true,
 			'network'      => Protocol::ACTIVITYPUB,
 			'name'         => 'System Account',
-			'addr'         => $system_actor_name . '@' . DI::baseUrl()->getHostname(),
+			'addr'         => $system_actor_name . '@' . DI::baseUrl()->getHost(),
 			'nick'         => $system_actor_name,
 			'url'          => DI::baseUrl() . '/friendica',
 			'pubkey'       => $keys['pubkey'],
@@ -266,8 +278,7 @@ class User
 		// List of possible actor names
 		$possible_accounts = ['friendica', 'actor', 'system', 'internal'];
 		foreach ($possible_accounts as $name) {
-			if (!DBA::exists('user', ['nickname' => $name, 'account_removed' => false, 'account_expired' => false]) &&
-				!DBA::exists('userd', ['username' => $name])) {
+			if (!DBA::exists('user', ['nickname' => $name]) && !DBA::exists('userd', ['username' => $name])) {
 				DI::config()->set('system', 'actor_name', $name);
 				return $name;
 			}
@@ -312,7 +323,7 @@ class User
 	public static function getByGuid(string $guid, array $fields = [], bool $active = true)
 	{
 		if ($active) {
-			$cond = ['guid' => $guid, 'account_expired' => false, 'account_removed' => false];
+			$cond = ['guid' => $guid, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false];
 		} else {
 			$cond = ['guid' => $guid];
 		}
@@ -329,6 +340,35 @@ class User
 	public static function getByNickname(string $nickname, array $fields = [])
 	{
 		return DBA::selectFirst('user', $fields, ['nickname' => $nickname]);
+	}
+
+	/**
+	 * Set static settings for community user accounts
+	 *
+	 * @param integer $uid
+	 * @return void
+	 */
+	public static function setCommunityUserSettings(int $uid)
+	{
+		$user = self::getById($uid, ['account-type', 'page-flags']);
+		if ($user['account-type'] != User::ACCOUNT_TYPE_COMMUNITY) {
+			return;
+		}
+
+		DI::pConfig()->set($uid, 'system', 'unlisted', true);
+
+		$fields = [
+			'allow_cid'  => '',
+			'allow_gid'  => $user['page-flags'] == User::PAGE_FLAGS_PRVGROUP ? '<' . Circle::FOLLOWERS . '>' : '',
+			'deny_cid'   => '',
+			'deny_gid'   => '',
+			'blockwall'  => true,
+			'blocktags'  => true,
+		];
+
+		User::update($fields, $uid);
+
+		Profile::update(['hide-friends' => true], $uid);
 	}
 
 	/**
@@ -384,7 +424,7 @@ class User
 	 * @return array user
 	 * @throws Exception
 	 */
-	public static function getFirstAdmin(array $fields = []) : array
+	public static function getFirstAdmin(array $fields = []): array
 	{
 		if (!empty(DI::config()->get('config', 'admin_nickname'))) {
 			return self::getByNickname(DI::config()->get('config', 'admin_nickname'), $fields);
@@ -482,23 +522,127 @@ class User
 	}
 
 	/**
-	 * Returns the default group for a given user and network
+	 * Returns the default circle for a given user
 	 *
 	 * @param int $uid User id
 	 *
-	 * @return int group id
+	 * @return int circle id
 	 * @throws Exception
 	 */
-	public static function getDefaultGroup(int $uid): int
+	public static function getDefaultCircle(int $uid): int
 	{
 		$user = DBA::selectFirst('user', ['def_gid'], ['uid' => $uid]);
 		if (DBA::isResult($user)) {
-			$default_group = $user["def_gid"];
+			$default_circle = $user['def_gid'];
 		} else {
-			$default_group = 0;
+			$default_circle = 0;
 		}
 
-		return $default_group;
+		return $default_circle;
+	}
+
+	/**
+	 * Returns the default circle for groups for a given user
+	 *
+	 * @param int $uid User id
+	 *
+	 * @return int circle id
+	 * @throws Exception
+	 */
+	public static function getDefaultGroupCircle(int $uid): int
+	{
+		$default_circle = DI::pConfig()->get($uid, 'system', 'default-group-gid');
+		if (empty($default_circle)) {
+			$default_circle = self::getDefaultCircle($uid);
+		}
+
+		return $default_circle;
+	}
+
+	/**
+	 * Fetch the language code from the given user. If the code is invalid, return the system language
+	 *
+	 * @param integer $uid User-Id
+	 * @return string
+	 */
+	public static function getLanguageCode(int $uid): string
+	{
+		$owner = self::getOwnerDataById($uid);
+		if (!empty($owner['language'])) {
+			$language = DI::l10n()->toISO6391($owner['language']);
+			if (in_array($language, array_keys(DI::l10n()->getLanguageCodes()))) {
+				return $language;
+			}
+		}
+		return DI::l10n()->toISO6391(DI::config()->get('system', 'language'));
+	}
+
+	/**
+	 * Fetch the wanted languages for a given user
+	 *
+	 * @param integer $uid
+	 * @return array
+	 */
+	public static function getWantedLanguages(int $uid): array
+	{
+		return DI::pConfig()->get($uid, 'channel', 'languages', [User::getLanguageCode($uid)]) ?? [];
+	}
+
+	/**
+	 * Get a list of all languages that are used by the users
+	 *
+	 * @return array
+	 */
+	public static function getLanguages(): array
+	{
+		$cachekey  = 'user:getLanguages';
+		$languages = DI::cache()->get($cachekey);
+		if (!is_null($languages)) {
+			return $languages;
+		}
+
+		$supported = array_keys(DI::l10n()->getLanguageCodes());
+		$languages = [];
+		$uids      = [];
+
+		$condition = ["`verified` AND NOT `blocked` AND NOT `account_removed` AND NOT `account_expired` AND `uid` > ?", 0];
+
+		$abandon_days = intval(DI::config()->get('system', 'account_abandon_days'));
+		if (!empty($abandon_days)) {
+			$condition = DBA::mergeConditions($condition, ["`last-activity` > ?", DateTimeFormat::utc('now - ' . $abandon_days . ' days')]);
+		}
+
+		$users = DBA::select('user', ['uid', 'language'], $condition);
+		while ($user = DBA::fetch($users)) {
+			$uids[] = $user['uid'];
+			$code = DI::l10n()->toISO6391($user['language']);
+			if (!in_array($code, $supported)) {
+				continue;
+			}
+			$languages[$code] = $code;
+		}
+		DBA::close($users);
+
+		$channels = DBA::select('pconfig', ['uid', 'v'], ["`cat` = ? AND `k` = ? AND `v` != ?", 'channel', 'languages', '']);
+		while ($channel = DBA::fetch($channels)) {
+			if (!in_array($channel['uid'], $uids)) {
+				continue;
+			}
+			$values = unserialize($channel['v']);
+			if (!empty($values) && is_array($values)) {
+				foreach ($values as $language) {
+					$language = DI::l10n()->toISO6391($language);
+					$languages[$language] = $language;
+				}
+			}
+		}
+		DBA::close($channels);
+
+		ksort($languages);
+		$languages = array_keys($languages);
+		DI::cache()->set($cachekey, $languages);
+
+		return $languages;
 	}
 
 	/**
@@ -528,7 +672,7 @@ class User
 			// Addons can create users, and since this 'catch' branch should only
 			// execute if getAuthenticationInfo can't find an existing user, that's
 			// exactly what will happen here. Creating a numeric username would create
-			// abiguity with user IDs, possibly opening up an attack vector.
+			// ambiguity with user IDs, possibly opening up an attack vector.
 			// So let's be very careful about that.
 			if (empty($username) || is_numeric($username)) {
 				throw $e;
@@ -652,7 +796,7 @@ class User
 				$fields = ['uid', 'nickname', 'password', 'legacy_password'];
 				$condition = [
 					"(`email` = ? OR `username` = ? OR `nickname` = ?)
-					AND NOT `blocked` AND NOT `account_expired` AND NOT `account_removed` AND `verified`",
+					AND `verified` AND NOT `blocked` AND NOT `account_removed` AND NOT `account_expired`",
 					$user_info, $user_info, $user_info
 				];
 				$user = DBA::selectFirst('user', $fields, $condition);
@@ -674,6 +818,10 @@ class User
 	 */
 	public static function updateLastActivity(int $uid)
 	{
+		if (!$uid) {
+			return;
+		}
+
 		$user = User::getById($uid, ['last-activity']);
 		if (empty($user)) {
 			return;
@@ -683,8 +831,8 @@ class User
 
 		if ($user['last-activity'] != $current_day) {
 			User::update(['last-activity' => $current_day], $uid);
-			// Set the last actitivy for all identities of the user
-			DBA::update('user', ['last-activity' => $current_day], ['parent-uid' => $uid, 'account_removed' => false]);
+			// Set the last activity for all identities of the user
+			DBA::update('user', ['last-activity' => $current_day], ['parent-uid' => $uid, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]);
 		}
 	}
 
@@ -757,7 +905,7 @@ class User
 	}
 
 	/**
-	 * Allowed characters are a-z, A-Z, 0-9 and special characters except white spaces, accentuated letters and colon (:).
+	 * Allowed characters are a-z, A-Z, 0-9 and special characters except white spaces and accentuated letters.
 	 *
 	 * Password length is limited to 72 characters if the current default password hashing algorithm is Blowfish.
 	 * From the manual: "Using the PASSWORD_BCRYPT as the algorithm, will result in the password parameter being
@@ -770,13 +918,13 @@ class User
 	 */
 	public static function getPasswordRegExp(string $delimiter = null): string
 	{
-		$allowed_characters = '!"#$%&\'()*+,-./;<=>?@[\]^_`{|}~';
+		$allowed_characters = ':!"#$%&\'()*+,-./;<=>?@[\]^_`{|}~';
 
 		if ($delimiter) {
 			$allowed_characters = preg_quote($allowed_characters, $delimiter);
 		}
 
-		return '^[a-zA-Z0-9' . $allowed_characters . ']' . (PASSWORD_DEFAULT !== PASSWORD_BCRYPT ? '{1,72}' : '+') . '$';
+		return '^[a-zA-Z0-9' . $allowed_characters . ']' . (PASSWORD_DEFAULT === PASSWORD_BCRYPT ? '{1,72}' : '+') . '$';
 	}
 
 	/**
@@ -804,7 +952,7 @@ class User
 		}
 
 		if (!preg_match('/' . self::getPasswordRegExp('/') . '/', $password)) {
-			throw new Exception(DI::l10n()->t('The password can\'t contain accentuated letters, white spaces or colons (:)'));
+			throw new Exception(DI::l10n()->t("The password can't contain white spaces nor accentuated letters"));
 		}
 
 		return self::updatePasswordHashed($uid, self::hashPassword($password));
@@ -815,14 +963,14 @@ class User
 	 * Empties the password reset token field just in case.
 	 *
 	 * @param int    $uid
-	 * @param string $pasword_hashed
+	 * @param string $password_hashed
 	 * @return bool
 	 * @throws Exception
 	 */
-	private static function updatePasswordHashed(int $uid, string $pasword_hashed): bool
+	private static function updatePasswordHashed(int $uid, string $password_hashed): bool
 	{
 		$fields = [
-			'password' => $pasword_hashed,
+			'password' => $password_hashed,
 			'pwdreset' => null,
 			'pwdreset_time' => null,
 			'legacy_password' => false
@@ -831,10 +979,40 @@ class User
 	}
 
 	/**
+	 * Returns if the given uid is valid and in the admin list
+	 *
+	 * @param int $uid
+	 *
+	 * @return bool
+	 * @throws Exception
+	 */
+	public static function isSiteAdmin(int $uid): bool
+	{
+		return DBA::exists('user', [
+			'uid'   => $uid,
+			'email' => self::getAdminEmailList()
+		]);
+	}
+
+	/**
+	 * Returns if the given uid is valid and a moderator
+	 *
+	 * @param int $uid
+	 *
+	 * @return bool
+	 * @throws Exception
+	 */
+	public static function isModerator(int $uid): bool
+	{
+		// @todo Replace with a moderator check in the future
+		return self::isSiteAdmin($uid);
+	}
+
+	/**
 	 * Checks if a nickname is in the list of the forbidden nicknames
 	 *
 	 * Check if a nickname is forbidden from registration on the node by the
-	 * admin. Forbidden nicknames (e.g. role namess) can be configured in the
+	 * admin. Forbidden nicknames (e.g. role names) can be configured in the
 	 * admin panel.
 	 *
 	 * @param string $nickname The nickname that should be checked
@@ -880,7 +1058,7 @@ class User
 	public static function getAvatarUrl(array $user, string $size = ''): string
 	{
 		if (empty($user['nickname'])) {
-			DI::logger()->warning('Missing user nickname key', ['trace' => System::callstack(20)]);
+			DI::logger()->warning('Missing user nickname key');
 		}
 
 		$url = DI::baseUrl() . '/photo/';
@@ -922,7 +1100,7 @@ class User
 	public static function getBannerUrl(array $user): string
 	{
 		if (empty($user['nickname'])) {
-			DI::logger()->warning('Missing user nickname key', ['trace' => System::callstack(20)]);
+			DI::logger()->warning('Missing user nickname key');
 		}
 
 		$url = DI::baseUrl() . '/photo/banner/';
@@ -1007,7 +1185,7 @@ class User
 				$_SESSION['register'] = 1;
 				$_SESSION['openid'] = $openid_url;
 
-				$openid = new LightOpenID(DI::baseUrl()->getHostname());
+				$openid = new LightOpenID(DI::baseUrl()->getHost());
 				$openid->identity = $openid_url;
 				$openid->returnUrl = DI::baseUrl() . '/openid';
 				$openid->required = ['namePerson/friendly', 'contact/email', 'namePerson'];
@@ -1049,7 +1227,7 @@ class User
 			throw new Exception(DI::l10n()->tt('Username should be at most %s character.', 'Username should be at most %s characters.', $username_max_length));
 		}
 
-		// So now we are just looking for a space in the full name.
+		// So now we are just looking for a space in the display name.
 		$loose_reg = DI::config()->get('system', 'no_regfullname');
 		if (!$loose_reg) {
 			$username = mb_convert_case($username, MB_CASE_TITLE, 'UTF-8');
@@ -1171,13 +1349,13 @@ class User
 			throw new Exception(DI::l10n()->t('An error occurred creating your self contact. Please try again.'));
 		}
 
-		// Create a group with no members. This allows somebody to use it
-		// right away as a default group for new contacts.
-		$def_gid = Group::create($uid, DI::l10n()->t('Friends'));
+		// Create a circle with no members. This allows somebody to use it
+		// right away as a default circle for new contacts.
+		$def_gid = Circle::create($uid, DI::l10n()->t('Friends'));
 		if (!$def_gid) {
 			DBA::delete('user', ['uid' => $uid]);
 
-			throw new Exception(DI::l10n()->t('An error occurred creating your default contact group. Please try again.'));
+			throw new Exception(DI::l10n()->t('An error occurred creating your default contact circle. Please try again.'));
 		}
 
 		$fields = ['def_gid' => $def_gid];
@@ -1186,6 +1364,11 @@ class User
 		}
 
 		DBA::update('user', $fields, ['uid' => $uid]);
+
+		$def_gid_groups = Circle::create($uid, DI::l10n()->t('Groups'));
+		if ($def_gid_groups) {
+			DI::pConfig()->set($uid, 'system', 'default-group-gid', $def_gid_groups);
+		}
 
 		// if we have no OpenID photo try to look up an avatar
 		if (!strlen($photo)) {
@@ -1215,7 +1398,7 @@ class User
 
 				$resource_id = Photo::newResource();
 
-				// Not using Photo::PROFILE_PHOTOS here, so that it is discovered as translateble string
+				// Not using Photo::PROFILE_PHOTOS here, so that it is discovered as translatable string
 				$profile_album = DI::l10n()->t('Profile Photos');
 
 				$r = Photo::store($image, $uid, 0, $resource_id, $filename, $profile_album, 4);
@@ -1250,6 +1433,8 @@ class User
 
 		Hook::callAll('register_account', $uid);
 
+		self::setRegisterMethodByUserCount();
+
 		$return['user'] = $user;
 		return $return;
 	}
@@ -1257,33 +1442,18 @@ class User
 	/**
 	 * Update a user entry and distribute the changes if needed
 	 *
-	 * @param array $fields
+	 * @param array   $fields
 	 * @param integer $uid
 	 * @return boolean
+	 * @throws Exception
 	 */
 	public static function update(array $fields, int $uid): bool
 	{
-		$old_owner = self::getOwnerDataById($uid);
-		if (empty($old_owner)) {
-			return false;
-		}
-
 		if (!DBA::update('user', $fields, ['uid' => $uid])) {
 			return false;
 		}
 
-		$update = Contact::updateSelfFromUserID($uid);
-
-		$owner = self::getOwnerDataById($uid);
-		if (empty($owner)) {
-			return false;
-		}
-
-		if ($old_owner['name'] != $owner['name']) {
-			Profile::update(['name' => $owner['name']], $uid);
-		}
-
-		if ($update) {
+		if (Contact::updateSelfFromUserID($uid)) {
 			Profile::publishUpdate($uid);
 		}
 
@@ -1344,7 +1514,7 @@ class User
 			$l10n,
 			$user,
 			DI::config()->get('config', 'sitename'),
-			DI::baseUrl()->get(),
+			DI::baseUrl(),
 			($register['password'] ?? '') ?: 'Sent in a previous email'
 		);
 	}
@@ -1358,7 +1528,7 @@ class User
 	 * permanently against re-registration, as the person was not yet
 	 * allowed to have friends on this system
 	 *
-	 * @return bool True, if the deny was successfull
+	 * @return bool True, if the deny was successful
 	 * @throws Exception
 	 */
 	public static function deny(string $hash): bool
@@ -1377,7 +1547,7 @@ class User
 		Photo::delete(['uid' => $register['uid']]);
 
 		return DBA::delete('user', ['uid' => $register['uid']]) &&
-		       Register::deleteByHash($register['hash']);
+			Register::deleteByHash($register['hash']);
 	}
 
 	/**
@@ -1427,10 +1597,9 @@ class User
 		You may also wish to add some basic information to your default profile
 		(on the "Profiles" page) so that other people can easily find you.
 
-		We recommend setting your full name, adding a profile photo,
-		adding some profile "keywords" (very useful in making new friends) - and
-		perhaps what country you live in; if you do not wish to be more specific
-		than that.
+		We recommend adding a profile photo, adding some profile "keywords" 
+		(very useful in making new friends) - and perhaps what country you live in; 
+		if you do not wish to be more specific than that.
 
 		We fully respect your right to privacy, and none of these items are necessary.
 		If you are new and do not know anybody here, they may help
@@ -1441,7 +1610,7 @@ class User
 		Thank you and welcome to %4$s.'));
 
 		$preamble = sprintf($preamble, $user['username'], DI::config()->get('config', 'sitename'));
-		$body = sprintf($body, DI::baseUrl()->get(), $user['nickname'], $result['password'], DI::config()->get('config', 'sitename'));
+		$body = sprintf($body, DI::baseUrl(), $user['nickname'], $result['password'], DI::config()->get('config', 'sitename'));
 
 		$email = DI::emailer()
 			->newSystemMail()
@@ -1531,10 +1700,9 @@ class User
 			You may also wish to add some basic information to your default profile
 			' . "\x28" . 'on the "Profiles" page' . "\x29" . ' so that other people can easily find you.
 
-			We recommend setting your full name, adding a profile photo,
-			adding some profile "keywords" ' . "\x28" . 'very useful in making new friends' . "\x29" . ' - and
-			perhaps what country you live in; if you do not wish to be more specific
-			than that.
+			We recommend adding a profile photo, adding some profile "keywords" ' . "\x28" . 'very useful
+			in making new friends' . "\x29" . ' - and perhaps what country you live in; if you do not wish
+			to be more specific than that.
 
 			We fully respect your right to privacy, and none of these items are necessary.
 			If you are new and do not know anybody here, they may help
@@ -1563,16 +1731,24 @@ class User
 	 * @param int $uid user to remove
 	 * @return bool
 	 * @throws HTTPException\InternalServerErrorException
+	 * @throws HTTPException\NotFoundException
 	 */
 	public static function remove(int $uid): bool
 	{
 		if (empty($uid)) {
-			return false;
+			throw new \InvalidArgumentException('uid needs to be greater than 0');
 		}
 
 		Logger::notice('Removing user', ['user' => $uid]);
 
-		$user = DBA::selectFirst('user', [], ['uid' => $uid]);
+		$user = self::getById($uid);
+		if (!$user) {
+			throw new HTTPException\NotFoundException('User not found with uid: ' . $uid);
+		}
+
+		if (DBA::exists('user', ['parent-uid' => $uid])) {
+			throw new \RuntimeException(DI::l10n()->t("User with delegates can't be removed, please remove delegate users first"));
+		}
 
 		Hook::callAll('remove_user', $user);
 
@@ -1594,6 +1770,7 @@ class User
 		// Remove the user relevant data
 		Worker::add(Worker::PRIORITY_NEGLIGIBLE, 'RemoveUser', $uid);
 
+		self::setRegisterMethodByUserCount();
 		return true;
 	}
 
@@ -1620,18 +1797,18 @@ class User
 	 */
 	public static function identities(int $uid): array
 	{
-		if (empty($uid)) {
+		if (!$uid) {
 			return [];
 		}
 
 		$identities = [];
 
-		$user = DBA::selectFirst('user', ['uid', 'nickname', 'username', 'parent-uid'], ['uid' => $uid]);
+		$user = DBA::selectFirst('user', ['uid', 'nickname', 'username', 'parent-uid'], ['uid' => $uid, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]);
 		if (!DBA::isResult($user)) {
 			return $identities;
 		}
 
-		if ($user['parent-uid'] == 0) {
+		if (!$user['parent-uid']) {
 			// First add our own entry
 			$identities = [[
 				'uid' => $user['uid'],
@@ -1643,7 +1820,7 @@ class User
 			$r = DBA::select(
 				'user',
 				['uid', 'username', 'nickname'],
-				['parent-uid' => $user['uid'], 'account_removed' => false]
+				['parent-uid' => $user['uid'], 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]
 			);
 			if (DBA::isResult($r)) {
 				$identities = array_merge($identities, DBA::toArray($r));
@@ -1653,7 +1830,7 @@ class User
 			$r = DBA::select(
 				'user',
 				['uid', 'username', 'nickname'],
-				['uid' => $user['parent-uid'], 'account_removed' => false]
+				['uid' => $user['parent-uid'], 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]
 			);
 			if (DBA::isResult($r)) {
 				$identities = DBA::toArray($r);
@@ -1663,7 +1840,7 @@ class User
 			$r = DBA::select(
 				'user',
 				['uid', 'username', 'nickname'],
-				['parent-uid' => $user['parent-uid'], 'account_removed' => false]
+				['parent-uid' => $user['parent-uid'], 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]
 			);
 			if (DBA::isResult($r)) {
 				$identities = array_merge($identities, DBA::toArray($r));
@@ -1674,7 +1851,7 @@ class User
 			"SELECT `user`.`uid`, `user`.`username`, `user`.`nickname`
 			FROM `manage`
 			INNER JOIN `user` ON `manage`.`mid` = `user`.`uid`
-			WHERE `user`.`account_removed` = 0 AND `manage`.`uid` = ?",
+			WHERE NOT `user`.`account_removed` AND `manage`.`uid` = ?",
 			$user['uid']
 		);
 		if (DBA::isResult($r)) {
@@ -1692,20 +1869,20 @@ class User
 	 */
 	public static function hasIdentities(int $uid): bool
 	{
-		if (empty($uid)) {
+		if (!$uid) {
 			return false;
 		}
 
-		$user = DBA::selectFirst('user', ['parent-uid'], ['uid' => $uid, 'account_removed' => false]);
+		$user = DBA::selectFirst('user', ['parent-uid'], ['uid' => $uid, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false]);
 		if (!DBA::isResult($user)) {
 			return false;
 		}
 
-		if ($user['parent-uid'] != 0) {
+		if ($user['parent-uid']) {
 			return true;
 		}
 
-		if (DBA::exists('user', ['parent-uid' => $uid, 'account_removed' => false])) {
+		if (DBA::exists('user', ['parent-uid' => $uid, 'verified' => true, 'blocked' => false, 'account_removed' => false, 'account_expired' => false])) {
 			return true;
 		}
 
@@ -1772,7 +1949,7 @@ class User
 	 *
 	 * @param int    $start Start count (Default is 0)
 	 * @param int    $count Count of the items per page (Default is @see Pager::ITEMS_PER_PAGE)
-	 * @param string $type  The type of users, which should get (all, bocked, removed)
+	 * @param string $type  The type of users, which should get (all, blocked, removed)
 	 * @param string $order Order of the user list (Default is 'contact.name')
 	 * @param bool   $descending Order direction (Default is ascending)
 	 * @return array|bool The list of the users
@@ -1828,8 +2005,8 @@ class User
 	{
 		$condition = [
 			'email'           => self::getAdminEmailList(),
-			'parent-uid'      => 0,
-			'blocked'         => 0,
+			'parent-uid'      => null,
+			'blocked'         => false,
 			'verified'        => true,
 			'account_removed' => false,
 			'account_expired' => false,
@@ -1860,5 +2037,30 @@ class User
 
 			return true;
 		});
+	}
+
+	public static function setRegisterMethodByUserCount()
+	{
+		$max_registered_users = DI::config()->get('config', 'max_registered_users');
+		if ($max_registered_users <= 0) {
+			return;
+		}
+
+		$register_policy = DI::config()->get('config', 'register_policy');
+		if (!in_array($register_policy, [Module\Register::OPEN, Module\Register::CLOSED])) {
+			Logger::debug('Unsupported register policy.', ['policy' => $register_policy]);
+			return;
+		}
+
+		$users = DBA::count('user', ['blocked' => false, 'account_removed' => false, 'account_expired' => false]);
+		if (($users >= $max_registered_users) && ($register_policy == Module\Register::OPEN)) {
+			DI::config()->set('config', 'register_policy', Module\Register::CLOSED);
+			Logger::notice('Max users reached, registration is closed.', ['users' => $users, 'max' => $max_registered_users]);
+		} elseif (($users < $max_registered_users) && ($register_policy == Module\Register::CLOSED)) {
+			DI::config()->set('config', 'register_policy', Module\Register::OPEN);
+			Logger::notice('Below maximum users, registration is opened.', ['users' => $users, 'max' => $max_registered_users]);
+		} else {
+			Logger::debug('Unchanged register policy', ['policy' => $register_policy, 'users' => $users, 'max' => $max_registered_users]);
+		}
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -146,6 +146,12 @@ final class ActivityNamespace
 	const ATOM1           = 'http://www.w3.org/2005/Atom';
 
 	/**
+	 * This namespace is used for the (deprecated) Atom 0.3 specification
+	 * @var string
+	 */
+	const ATOM03           = 'http://purl.org/atom/ns#';
+	
+	/**
 	 * @var string
 	 */
 	const MASTODON        = 'http://mastodon.social/schema/1.0';
@@ -158,5 +164,5 @@ final class ActivityNamespace
 	/**
 	 * @var string
 	 */
-	const PEERTUBE        = 'https://joinpeertube.org';	
+	const PEERTUBE        = 'https://joinpeertube.org';
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -22,6 +22,7 @@
 namespace Friendica\Module\Update;
 
 use Friendica\BaseModule;
+use Friendica\Content\Conversation;
 use Friendica\Core\System;
 use Friendica\Database\DBA;
 use Friendica\DI;
@@ -39,7 +40,7 @@ class Profile extends BaseModule
 		$a = DI::app();
 
 		// Ensure we've got a profile owner if updating.
-		$a->setProfileOwner((int)($_GET['p'] ?? 0));
+		$a->setProfileOwner((int)($request['p'] ?? 0));
 
 		if (DI::config()->get('system', 'block_public') && !DI::userSession()->getLocalUserId() && !DI::userSession()->getRemoteContactID($a->getProfileOwner())) {
 			throw new ForbiddenException();
@@ -58,11 +59,11 @@ class Profile extends BaseModule
 
 		$o = '';
 
-		if (empty($_GET['force']) && DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'no_auto_update')) {
+		if (empty($request['force'])) {
 			System::htmlUpdateExit($o);
 		}
 
-		// Get permissions SQL - if $remote_contact is true, our remote user has been pre-verified and we already have fetched his/her groups
+		// Get permissions SQL - if $remote_contact is true, our remote user has been pre-verified and we already have fetched their circles
 		$sql_extra = Item::getPermissionsSQLByUserId($a->getProfileOwner());
 
 		$last_updated_array = DI::session()->get('last_updated', []);
@@ -73,9 +74,9 @@ class Profile extends BaseModule
 				AND `visible` AND (NOT `deleted` OR `gravity` = ?)
 				AND `wall` " . $sql_extra, $a->getProfileOwner(), Item::GRAVITY_ACTIVITY];
 
-		if ($_GET['force'] && !empty($_GET['item'])) {
+		if ($request['force'] && !empty($request['item'])) {
 			// When the parent is provided, we only fetch this
-			$condition = DBA::mergeConditions($condition, ['parent' => $_GET['item']]);
+			$condition = DBA::mergeConditions($condition, ['parent' => $request['item']]);
 		} elseif ($is_owner || !$last_updated) {
 			// If the page user is the owner of the page we should query for unseen
 			// items. Otherwise use a timestamp of the last succesful update request.
@@ -103,9 +104,9 @@ class Profile extends BaseModule
 		$last_updated_array[$last_updated_key] = time();
 		DI::session()->set('last_updated', $last_updated_array);
 
-		if ($is_owner && !$a->getProfileOwner() && !DI::config()->get('theme', 'hide_eventlist')) {
-			$o .= ProfileModel::getBirthdays();
-			$o .= ProfileModel::getEventsReminderHTML();
+		if ($is_owner && !$a->getProfileOwner() && ProfileModel::shouldDisplayEventList(DI::userSession()->getLocalUserId(), DI::mode())) {
+			$o .= ProfileModel::getBirthdays(DI::userSession()->getLocalUserId());
+			$o .= ProfileModel::getEventsReminderHTML(DI::userSession()->getLocalUserId(), DI::userSession()->getPublicContactId());
 		}
 
 		if ($is_owner) {
@@ -115,7 +116,7 @@ class Profile extends BaseModule
 			}
 		}
 
-		$o .= DI::conversation()->create($items, 'profile', $a->getProfileOwner(), false, 'received', $a->getProfileOwner());
+		$o .= DI::conversation()->render($items, Conversation::MODE_PROFILE, $a->getProfileOwner(), false, 'received', $a->getProfileOwner());
 
 		System::htmlUpdateExit($o);
 	}

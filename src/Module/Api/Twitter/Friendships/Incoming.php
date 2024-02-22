@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -32,7 +32,7 @@ class Incoming extends ContactEndpoint
 {
 	protected function rawContent(array $request = [])
 	{
-		self::checkAllowedScope(self::SCOPE_READ);
+		$this->checkAllowedScope(self::SCOPE_READ);
 		$uid = BaseApi::getCurrentUserID();
 
 		// Expected value for user_id parameter: public/user contact id
@@ -80,8 +80,8 @@ class Incoming extends ContactEndpoint
 
 		$return = self::ids($ids, $total_count, $cursor, $count, $stringify_ids);
 
-		$this->response->setHeader(self::getLinkHeader());	
+		$this->response->setHeader(self::getLinkHeader());
 
-		$this->response->exit('incoming', ['incoming' => $return]);
+		$this->response->addFormattedContent('incoming', ['incoming' => $return]);
 	}
 }

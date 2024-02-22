@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -26,6 +26,7 @@ use Friendica\Core\System;
 use Friendica\Database\DBA;
 use Friendica\DI;
 use Friendica\Module\BaseApi;
+use Friendica\Module\Special\HTTPException;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -33,9 +34,9 @@ use Psr\Http\Message\ResponseInterface;
  */
 class Revoke extends BaseApi
 {
-	public function run(array $request = [], bool $scopecheck = true): ResponseInterface
+	public function run(HTTPException $httpException, array $request = [], bool $scopecheck = true): ResponseInterface
 	{
-		return parent::run($request, false);
+		return parent::run($httpException, $request, false);
 	}
 
 	protected function post(array $request = [])
@@ -49,11 +50,11 @@ class Revoke extends BaseApi
 		$condition = ['client_id' => $request['client_id'], 'client_secret' => $request['client_secret'], 'access_token' => $request['token']];
 		$token = DBA::selectFirst('application-view', ['id'], $condition);
 		if (empty($token['id'])) {
-			Logger::notice('Token not found', $condition);
-			DI::mstdnError()->Unauthorized();
+			$this->logger->notice('Token not found', $condition);
+			$this->logAndJsonError(401, $this->errorFactory->Unauthorized());
 		}
 
 		DBA::delete('application-token', ['application-id' => $token['id']]);
-		System::jsonExit([]);
+		$this->jsonExit([]);
 	}
 }

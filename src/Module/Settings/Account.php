@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -29,7 +29,7 @@ use Friendica\Core\Search;
 use Friendica\Core\Worker;
 use Friendica\Database\DBA;
 use Friendica\DI;
-use Friendica\Model\Group;
+use Friendica\Model\Circle;
 use Friendica\Model\Notification;
 use Friendica\Model\Post\UserNotification;
 use Friendica\Model\Profile;
@@ -38,9 +38,9 @@ use Friendica\Model\Verb;
 use Friendica\Module\BaseSettings;
 use Friendica\Network\HTTPException;
 use Friendica\Protocol\Activity;
+use Friendica\Protocol\Delivery;
 use Friendica\Util\Network;
 use Friendica\Util\Temporal;
-use Friendica\Worker\Delivery;
 
 class Account extends BaseSettings
 {
@@ -162,23 +162,24 @@ class Account extends BaseSettings
 			$blocktags    = empty($request['blocktags']); // this setting is inverted!
 			$unkmail      = !empty($request['unkmail']);
 			$cntunkmail   = intval($request['cntunkmail'] ?? 0);
-			$def_gid      = intval($request['group-selection'] ?? 0);
+			$def_gid      = intval($request['circle-selection'] ?? 0);
 
 			$aclFormatter = DI::aclFormatter();
 
-			$str_group_allow   = !empty($request['group_allow']) ? $aclFormatter->toString($request['group_allow']) : '';
 			$str_contact_allow = !empty($request['contact_allow']) ? $aclFormatter->toString($request['contact_allow']) : '';
-			$str_group_deny    = !empty($request['group_deny']) ? $aclFormatter->toString($request['group_deny']) : '';
-			$str_contact_deny  = !empty($request['contact_deny']) ? $aclFormatter->toString($request['contact_deny']) : '';
+			$str_circle_allow  = !empty($request['circle_allow'])  ? $aclFormatter->toString($request['circle_allow'])  : '';
+			$str_contact_deny  = !empty($request['contact_deny'])  ? $aclFormatter->toString($request['contact_deny'])  : '';
+			$str_circle_deny   = !empty($request['circle_deny'])   ? $aclFormatter->toString($request['circle_deny'])   : '';
 
 			DI::pConfig()->set(DI::userSession()->getLocalUserId(), 'system', 'unlisted', !empty($request['unlisted']));
 			DI::pConfig()->set(DI::userSession()->getLocalUserId(), 'system', 'accessible-photos', !empty($request['accessible-photos']));
+			DI::pConfig()->set(DI::userSession()->getLocalUserId(), 'system', 'default-group-gid', intval($request['circle-selection-group'] ?? $def_gid));
 
 			$fields = [
 				'allow_cid'  => $str_contact_allow,
-				'allow_gid'  => $str_group_allow,
+				'allow_gid'  => $str_circle_allow,
 				'deny_cid'   => $str_contact_deny,
-				'deny_gid'   => $str_group_deny,
+				'deny_gid'   => $str_circle_deny,
 				'maxreq'     => $maxreq,
 				'def_gid'    => $def_gid,
 				'blockwall'  => $blockwall,
@@ -198,6 +199,7 @@ class Account extends BaseSettings
 				DI::sysmsg()->addNotice(DI::l10n()->t('Settings were not updated.'));
 			}
 
+			User::setCommunityUserSettings(DI::userSession()->getLocalUserId());
 			DI::baseUrl()->redirect($redirectUrl);
 		}
 
@@ -320,37 +322,16 @@ class Account extends BaseSettings
 				$page_flags = User::PAGE_FLAGS_COMMUNITY;
 			}
 
-			$fields         = [];
-			$profile_fields = [];
-
-			if ($account_type == User::ACCOUNT_TYPE_COMMUNITY) {
-				DI::pConfig()->set(DI::userSession()->getLocalUserId(), 'system', 'unlisted', true);
-
-				$fields = [
-					'allow_cid' => '',
-					'allow_gid' => $page_flags == User::PAGE_FLAGS_PRVGROUP ?
-							'<' . Group::FOLLOWERS . '>'
-							: '',
-					'deny_cid'  => '',
-					'deny_gid'  => '',
-					'blockwall' => true,
-					'blocktags' => true,
-				];
-
-				$profile_fields = [
-					'hide-friends' => true,
-				];
-			}
-
-			$fields = array_merge($fields, [
+			$fields = [
 				'page-flags'   => $page_flags,
 				'account-type' => $account_type,
-			]);
+			];
 
-			if (!User::update($fields, DI::userSession()->getLocalUserId()) || !empty($profile_fields) && !Profile::update($profile_fields, DI::userSession()->getLocalUserId())) {
+			if (!User::update($fields, DI::userSession()->getLocalUserId())) {
 				DI::sysmsg()->addNotice(DI::l10n()->t('Settings were not updated.'));
 			}
 
+			User::setCommunityUserSettings(DI::userSession()->getLocalUserId());
 			DI::baseUrl()->redirect($redirectUrl);
 		}
 
@@ -452,7 +433,7 @@ class Account extends BaseSettings
 		$pagetype    = Renderer::replaceMacros($pageset_tpl, [
 			'$account_types'     => DI::l10n()->t("Account Types"),
 			'$user'              => DI::l10n()->t("Personal Page Subtypes"),
-			'$community'         => DI::l10n()->t("Community Forum Subtypes"),
+			'$community'         => DI::l10n()->t("Community Group Subtypes"),
 			'$account_type'      => $user['account-type'],
 			'$type_person'       => User::ACCOUNT_TYPE_PERSON,
 			'$type_organisation' => User::ACCOUNT_TYPE_ORGANISATION,
@@ -481,7 +462,7 @@ class Account extends BaseSettings
 			],
 			'$account_community' => [
 				'account-type',
-				DI::l10n()->t('Community Forum'),
+				DI::l10n()->t('Community Group'),
 				User::ACCOUNT_TYPE_COMMUNITY,
 				DI::l10n()->t('Account for community discussions.'),
 				$user['account-type'] == User::ACCOUNT_TYPE_COMMUNITY
@@ -502,7 +483,7 @@ class Account extends BaseSettings
 			],
 			'$page_community' => [
 				'page-flags',
-				DI::l10n()->t('Public Forum'),
+				DI::l10n()->t('Public Group'),
 				User::PAGE_FLAGS_COMMUNITY,
 				DI::l10n()->t('Automatically approves all contact requests.'),
 				$user['page-flags'] == User::PAGE_FLAGS_COMMUNITY
@@ -516,7 +497,7 @@ class Account extends BaseSettings
 			],
 			'$page_prvgroup' => [
 				'page-flags',
-				DI::l10n()->t('Private Forum [Experimental]'),
+				DI::l10n()->t('Private Group [Experimental]'),
 				User::PAGE_FLAGS_PRVGROUP,
 				DI::l10n()->t('Requires manual approval of contact requests.'),
 				$user['page-flags'] == User::PAGE_FLAGS_PRVGROUP
@@ -549,16 +530,15 @@ class Account extends BaseSettings
 
 		$notify_type = DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'notify_type');
 
-		$passwordRules = DI::l10n()->t('Allowed characters are a-z, A-Z, 0-9 and special characters except white spaces, accentuated letters and colon (:).')
+		$passwordRules = DI::l10n()->t('Allowed characters are a-z, A-Z, 0-9 and special characters except white spaces and accentuated letters.')
 			. (PASSWORD_DEFAULT === PASSWORD_BCRYPT ? ' ' . DI::l10n()->t('Password length is limited to 72 characters.') : '');
 
 		$tpl = Renderer::getMarkupTemplate('settings/account.tpl');
 		$o   = Renderer::replaceMacros($tpl, [
 			'$ptitle' => DI::l10n()->t('Account Settings'),
-			'$desc'   => DI::l10n()->t("Your Identity Address is <strong>'%s'</strong> or '%s'.", $nickname . '@' . DI::baseUrl()->getHostname() . DI::baseUrl()->getUrlPath(), DI::baseUrl() . '/profile/' . $nickname),
+			'$desc'   => DI::l10n()->t("Your Identity Address is <strong>'%s'</strong> or '%s'.", $nickname . '@' . DI::baseUrl()->getHost() . DI::baseUrl()->getPath(), DI::baseUrl() . '/profile/' . $nickname),
 
 			'$submit'              => DI::l10n()->t('Save Settings'),
-			'$baseurl'             => DI::baseUrl()->get(true),
 			'$uid'                 => DI::userSession()->getLocalUserId(),
 			'$form_security_token' => self::getFormSecurityToken('settings'),
 			'$open'                => $this->parameters['open'] ?? 'password',
@@ -573,7 +553,7 @@ class Account extends BaseSettings
 			'$delete_openid' => ['delete_openid', DI::l10n()->t('Delete OpenID URL'), false, ''],
 
 			'$h_basic'          => DI::l10n()->t('Basic Settings'),
-			'$username'         => ['username', DI::l10n()->t('Full Name:'), $username, '', false, 'autocomplete="off"'],
+			'$username'         => ['username', DI::l10n()->t('Display name:'), $username, '', false, 'autocomplete="off"'],
 			'$email'            => ['email', DI::l10n()->t('Email Address:'), $email, '', '', 'autocomplete="off"', 'email'],
 			'$timezone'         => ['timezone_select', DI::l10n()->t('Your Timezone:'), Temporal::getTimezoneSelect($timezone), ''],
 			'$language'         => ['language', DI::l10n()->t('Your Language:'), $language, DI::l10n()->t('Set the language we use to show you friendica interface and to send you emails'), $lang_choices],
@@ -593,7 +573,8 @@ class Account extends BaseSettings
 			'$blocktags'          => ['blocktags', DI::l10n()->t('Allow friends to tag your posts?'), (intval($user['blocktags']) ? '0' : '1'), DI::l10n()->t('Your contacts can add additional tags to your posts.')],
 			'$unkmail'            => ['unkmail', DI::l10n()->t('Permit unknown people to send you private mail?'), $unkmail, DI::l10n()->t('Friendica network users may send you private messages even if they are not in your contact list.')],
 			'$cntunkmail'         => ['cntunkmail', DI::l10n()->t('Maximum private messages per day from unknown people:'), $cntunkmail, DI::l10n()->t("(to prevent spam abuse)")],
-			'$group_select'       => Group::displayGroupSelection(DI::userSession()->getLocalUserId(), $user['def_gid']),
+			'$circle_select'      => Circle::getSelectorHTML(DI::userSession()->getLocalUserId(), $user['def_gid'], 'circle-selection', DI::l10n()->t('Default privacy circle for new contacts')),
+			'$circle_select_group' => Circle::getSelectorHTML(DI::userSession()->getLocalUserId(), DI::pConfig()->get(DI::userSession()->getLocalUserId(), 'system', 'default-group-gid', $user['def_gid']), 'circle-selection-group', DI::l10n()->t('Default privacy circle for new group contacts')),
 			'$permissions'        => DI::l10n()->t('Default Post Permissions'),
 			'$aclselect'          => ACL::getFullSelectorHTML(DI::page(), $a->getLoggedInUserId()),
 

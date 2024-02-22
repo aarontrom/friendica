@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -23,7 +23,6 @@ namespace Friendica\Util;
 
 use Friendica\Content\ContactSelector;
 use Friendica\Core\Logger;
-use Friendica\Core\System;
 use ParagonIE\ConstantTime\Base64;
 
 /**
@@ -511,7 +510,7 @@ class Strings
 		);
 
 		if (is_null($return)) {
-			Logger::warning('Received null value from preg_replace_callback', ['text' => $text, 'regex' => $regex, 'blocks' => $blocks, 'executionId' => $executionId, 'callstack' => System::callstack(10)]);
+			Logger::notice('Received null value from preg_replace_callback', ['text' => $text, 'regex' => $regex, 'blocks' => $blocks, 'executionId' => $executionId]);
 		}
 
 		$text = $callback($return ?? $text) ?? '';
@@ -532,7 +531,7 @@ class Strings
 	}
 
 	/**
-	 * This function converts a PHP's shorhand notation string for file sizes in to an integer number of total bytes.
+	 * This function converts a file size string written in PHP's shorthand notation to an integer number of total bytes.
 	 * For example: The string for shorthand notation of '2M' (which is 2,097,152 Bytes) is converted to 2097152
 	 * @see https://www.php.net/manual/en/faq.using.php#faq.using.shorthandbytes
 	 * @param string $shorthand
@@ -561,4 +560,22 @@ class Strings
 		return $shorthand;
 	}
 
+	/**
+	 * Converts an URL in a nicer format (without the scheme and possibly shortened)
+	 *
+	 * @param string $url URL that is about to be reformatted
+	 * @return string reformatted link
+	 */
+	public static function getStyledURL(string $url): string
+	{
+		$parts = parse_url($url);
+		$scheme = [$parts['scheme'] . '://www.', $parts['scheme'] . '://'];
+		$styled_url = str_replace($scheme, '', $url);
+
+		if (strlen($styled_url) > 30) {
+			$styled_url = substr($styled_url, 0, 30) . "…";
+		}
+
+		return $styled_url;
+	}
 }

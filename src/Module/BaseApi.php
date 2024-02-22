@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -21,19 +21,24 @@
 
 namespace Friendica\Module;
 
+use DateTime;
 use Friendica\App;
 use Friendica\App\Router;
 use Friendica\BaseModule;
 use Friendica\Core\L10n;
 use Friendica\Core\Logger;
-use Friendica\Core\System;
+use Friendica\Database\DBA;
 use Friendica\DI;
 use Friendica\Model\Contact;
 use Friendica\Model\Item;
 use Friendica\Model\Post;
 use Friendica\Model\User;
 use Friendica\Module\Api\ApiResponse;
+use Friendica\Module\Special\HTTPException as ModuleHTTPException;
 use Friendica\Network\HTTPException;
+use Friendica\Object\Api\Mastodon\Error;
+use Friendica\Object\Api\Mastodon\Status;
+use Friendica\Object\Api\Mastodon\TimelineOrderByTypes;
 use Friendica\Security\BasicAuth;
 use Friendica\Security\OAuth;
 use Friendica\Util\DateTimeFormat;
@@ -66,11 +71,15 @@ class BaseApi extends BaseModule
 	/** @var ApiResponse */
 	protected $response;
 
-	public function __construct(App $app, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, ApiResponse $response, array $server, array $parameters = [])
+	/** @var \Friendica\Factory\Api\Mastodon\Error */
+	protected $errorFactory;
+
+	public function __construct(\Friendica\Factory\Api\Mastodon\Error $errorFactory, App $app, L10n $l10n, App\BaseURL $baseUrl, App\Arguments $args, LoggerInterface $logger, Profiler $profiler, ApiResponse $response, array $server, array $parameters = [])
 	{
 		parent::__construct($l10n, $baseUrl, $args, $logger, $profiler, $response, $server, $parameters);
 
-		$this->app = $app;
+		$this->app          = $app;
+		$this->errorFactory = $errorFactory;
 	}
 
 	/**
@@ -80,7 +89,7 @@ class BaseApi extends BaseModule
 	 *
 	 * @throws HTTPException\ForbiddenException
 	 */
-	public function run(array $request = [], bool $scopecheck = true): ResponseInterface
+	public function run(ModuleHTTPException $httpException, array $request = [], bool $scopecheck = true): ResponseInterface
 	{
 		if ($scopecheck) {
 			switch ($this->args->getMethod()) {
@@ -88,16 +97,150 @@ class BaseApi extends BaseModule
 				case Router::PATCH:
 				case Router::POST:
 				case Router::PUT:
-					self::checkAllowedScope(self::SCOPE_WRITE);
-	
+					$this->checkAllowedScope(self::SCOPE_WRITE);
+
 					if (!self::getCurrentUserID()) {
 						throw new HTTPException\ForbiddenException($this->t('Permission denied.'));
 					}
 					break;
-			}	
+			}
 		}
 
-		return parent::run($request);
+		return parent::run($httpException, $request);
+	}
+
+	/**
+	 * Processes data from GET requests and sets paging conditions
+	 *
+	 * @param array $request       Custom REQUEST array
+	 * @param array $condition     Existing conditions to merge
+	 * @return array paging data condition parameters data
+	 * @throws \Exception
+	 */
+	protected function addPagingConditions(array $request, array $condition): array
+	{
+		$requested_order = $request['friendica_order'];
+		if ($requested_order == TimelineOrderByTypes::ID) {
+			if (!empty($request['max_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`uri-id` < ?", intval($request['max_id'])]);
+			}
+
+			if (!empty($request['since_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`uri-id` > ?", intval($request['since_id'])]);
+			}
+
+			if (!empty($request['min_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`uri-id` > ?", intval($request['min_id'])]);
+			}
+		} else {
+			switch ($requested_order) {
+				case TimelineOrderByTypes::RECEIVED:
+				case TimelineOrderByTypes::CHANGED:
+				case TimelineOrderByTypes::EDITED:
+				case TimelineOrderByTypes::CREATED:
+				case TimelineOrderByTypes::COMMENTED:
+					$order_field = $requested_order;
+					break;
+				default:
+					throw new \Exception("Unrecognized request order: $requested_order");
+			}
+
+			if (!empty($request['max_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`$order_field` < ?", DateTimeFormat::convert($request['max_id'], DateTimeFormat::MYSQL)]);
+			}
+
+			if (!empty($request['since_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`$order_field` > ?", DateTimeFormat::convert($request['since_id'], DateTimeFormat::MYSQL)]);
+			}
+
+			if (!empty($request['min_id'])) {
+				$condition = DBA::mergeConditions($condition, ["`$order_field` > ?", DateTimeFormat::convert($request['min_id'], DateTimeFormat::MYSQL)]);
+			}
+		}
+
+		return $condition;
+	}
+
+	/**
+	 * Processes data from GET requests and sets paging conditions
+	 *
+	 * @param array $request  Custom REQUEST array
+	 * @param array $params   Existing $params element to build on
+	 * @return array ordering data added to the params blocks that was passed in
+	 * @throws \Exception
+	 */
+	protected function buildOrderAndLimitParams(array $request, array $params = []): array
+	{
+		$requested_order = $request['friendica_order'];
+		switch ($requested_order) {
+			case TimelineOrderByTypes::CHANGED:
+			case TimelineOrderByTypes::CREATED:
+			case TimelineOrderByTypes::COMMENTED:
+			case TimelineOrderByTypes::EDITED:
+			case TimelineOrderByTypes::RECEIVED:
+				$order_field = $requested_order;
+				break;
+			case TimelineOrderByTypes::ID:
+			default:
+				$order_field = 'uri-id';
+		}
+
+		if (!empty($request['min_id'])) {
+			$params['order'] = [$order_field];
+		} else {
+			$params['order'] = [$order_field => true];
+		}
+
+		$params['limit'] = $request['limit'];
+
+		return $params;
+	}
+
+	/**
+	 * Update the ID/time boundaries for this result set. Used for building Link Headers
+	 *
+	 * @param Status $status
+	 * @param array $post_item
+	 * @param string $order
+	 * @return void
+	 * @throws \Exception
+	 */
+	protected function updateBoundaries(Status $status, array $post_item, string $order)
+	{
+		try {
+			switch ($order) {
+				case TimelineOrderByTypes::CHANGED:
+					if (!empty($status->friendicaExtension()->changedAt())) {
+						self::setBoundaries(new DateTime(DateTimeFormat::utc($status->friendicaExtension()->changedAt(), DateTimeFormat::JSON)));
+					}
+					break;
+				case TimelineOrderByTypes::CREATED:
+					if (!empty($status->createdAt())) {
+						self::setBoundaries(new DateTime(DateTimeFormat::utc($status->createdAt(), DateTimeFormat::JSON)));
+					}
+					break;
+				case TimelineOrderByTypes::COMMENTED:
+					if (!empty($status->friendicaExtension()->commentedAt())) {
+						self::setBoundaries(new DateTime(DateTimeFormat::utc($status->friendicaExtension()->commentedAt(), DateTimeFormat::JSON)));
+					}
+					break;
+				case TimelineOrderByTypes::EDITED:
+					if (!empty($status->editedAt())) {
+						self::setBoundaries(new DateTime(DateTimeFormat::utc($status->editedAt(), DateTimeFormat::JSON)));
+					}
+					break;
+				case TimelineOrderByTypes::RECEIVED:
+					if (!empty($status->friendicaExtension()->receivedAt())) {
+						self::setBoundaries(new DateTime(DateTimeFormat::utc($status->friendicaExtension()->receivedAt(), DateTimeFormat::JSON)));
+					}
+					break;
+				case TimelineOrderByTypes::ID:
+				default:
+					self::setBoundaries($post_item['uri-id']);
+			}
+		} catch (\Exception $e) {
+			Logger::debug('Error processing page boundary calculation, skipping', ['error' => $e]);
+		}
 	}
 
 	/**
@@ -122,9 +265,9 @@ class BaseApi extends BaseModule
 	/**
 	 * Set boundaries for the "link" header
 	 * @param array $boundaries
-	 * @param int $id
+	 * @param int|\DateTime $id
 	 */
-	protected static function setBoundaries(int $id)
+	protected static function setBoundaries($id)
 	{
 		if (!isset(self::$boundaries['min'])) {
 			self::$boundaries['min'] = $id;
@@ -142,7 +285,7 @@ class BaseApi extends BaseModule
 	 * Get the "link" header with "next" and "prev" links
 	 * @return string
 	 */
-	protected static function getLinkHeader(): string
+	protected static function getLinkHeader(bool $asDate = false): string
 	{
 		if (empty(self::$boundaries)) {
 			return '';
@@ -156,8 +299,15 @@ class BaseApi extends BaseModule
 
 		$prev_request = $next_request = $request;
 
-		$prev_request['min_id'] = self::$boundaries['max'];
-		$next_request['max_id'] = self::$boundaries['min'];
+		if ($asDate) {
+			$max_date = self::$boundaries['max'];
+			$min_date = self::$boundaries['min'];
+			$prev_request['min_id'] = $max_date->format(DateTimeFormat::JSON);
+			$next_request['max_id'] = $min_date->format(DateTimeFormat::JSON);
+		} else {
+			$prev_request['min_id'] = self::$boundaries['max'];
+			$next_request['max_id'] = self::$boundaries['min'];
+		}
 
 		$command = DI::baseUrl() . '/' . DI::args()->getCommand();
 
@@ -168,15 +318,66 @@ class BaseApi extends BaseModule
 	}
 
 	/**
+	 * Get the "link" header with "next" and "prev" links for an offset/limit type call
+	 * @return string
+	 */
+	protected static function getOffsetAndLimitLinkHeader(int $offset, int $limit): string
+	{
+		$request = self::$request;
+
+		unset($request['offset']);
+		$request['limit'] = $limit;
+
+		$prev_request = $next_request = $request;
+
+		$prev_request['offset'] = $offset - $limit;
+		$next_request['offset'] = $offset + $limit;
+
+		$command = DI::baseUrl() . '/' . DI::args()->getCommand();
+
+		$prev = $command . '?' . http_build_query($prev_request);
+		$next = $command . '?' . http_build_query($next_request);
+
+		if ($prev_request['offset'] >= 0) {
+			return 'Link: <' . $next . '>; rel="next", <' . $prev . '>; rel="prev"';
+		} else {
+			return 'Link: <' . $next . '>; rel="next"';
+		}
+	}
+
+	/**
 	 * Set the "link" header with "next" and "prev" links
 	 * @return void
 	 */
-	protected static function setLinkHeader()
+	protected static function setLinkHeader(bool $asDate = false)
 	{
-		$header = self::getLinkHeader();
+		$header = self::getLinkHeader($asDate);
 		if (!empty($header)) {
 			header($header);
 		}
+	}
+
+	/**
+	 * Set the "link" header with "next" and "prev" links
+	 * @return void
+	 */
+	protected static function setLinkHeaderByOffsetLimit(int $offset, int $limit)
+	{
+		$header = self::getOffsetAndLimitLinkHeader($offset, $limit);
+		if (!empty($header)) {
+			header($header);
+		}
+	}
+
+	/**
+	 * Check if the app is known to support quoted posts
+	 *
+	 * @return bool
+	 */
+	public static function appSupportsQuotes(): bool
+	{
+		$token = OAuth::getCurrentApplicationToken();
+		return (!empty($token['name']) && in_array($token['name'], ['Fedilab']));
 	}
 
 	/**
@@ -217,27 +418,27 @@ class BaseApi extends BaseModule
 	 *
 	 * @param string $scope the requested scope (read, write, follow, push)
 	 */
-	public static function checkAllowedScope(string $scope)
+	public function checkAllowedScope(string $scope)
 	{
 		$token = self::getCurrentApplication();
 
 		if (empty($token)) {
-			Logger::notice('Empty application token');
-			DI::mstdnError()->Forbidden();
+			$this->logger->notice('Empty application token');
+			$this->logAndJsonError(403, $this->errorFactory->Forbidden());
 		}
 
 		if (!isset($token[$scope])) {
-			Logger::warning('The requested scope does not exist', ['scope' => $scope, 'application' => $token]);
-			DI::mstdnError()->Forbidden();
+			$this->logger->warning('The requested scope does not exist', ['scope' => $scope, 'application' => $token]);
+			$this->logAndJsonError(403, $this->errorFactory->Forbidden());
 		}
 
 		if (empty($token[$scope])) {
-			Logger::warning('The requested scope is not allowed', ['scope' => $scope, 'application' => $token]);
-			DI::mstdnError()->Forbidden();
+			$this->logger->warning('The requested scope is not allowed', ['scope' => $scope, 'application' => $token]);
+			$this->logAndJsonError(403, $this->errorFactory->Forbidden());
 		}
 	}
 
-	public static function checkThrottleLimit()
+	public function checkThrottleLimit()
 	{
 		$uid = self::getCurrentUserID();
 
@@ -250,11 +451,11 @@ class BaseApi extends BaseModule
 			$posts_day = Post::countThread($condition);
 
 			if ($posts_day > $throttle_day) {
-				Logger::notice('Daily posting limit reached', ['uid' => $uid, 'posts' => $posts_day, 'limit' => $throttle_day]);
-				$error = DI::l10n()->t('Too Many Requests');
-				$error_description = DI::l10n()->tt("Daily posting limit of %d post reached. The post was rejected.", "Daily posting limit of %d posts reached. The post was rejected.", $throttle_day);
+				$this->logger->notice('Daily posting limit reached', ['uid' => $uid, 'posts' => $posts_day, 'limit' => $throttle_day]);
+				$error = $this->t('Too Many Requests');
+				$error_description = $this->tt("Daily posting limit of %d post reached. The post was rejected.", "Daily posting limit of %d posts reached. The post was rejected.", $throttle_day);
 				$errorobj = new \Friendica\Object\Api\Mastodon\Error($error, $error_description);
-				System::jsonError(429, $errorobj->toArray());
+				$this->jsonError(429, $errorobj->toArray());
 			}
 		}
 
@@ -267,10 +468,10 @@ class BaseApi extends BaseModule
 
 			if ($posts_week > $throttle_week) {
 				Logger::notice('Weekly posting limit reached', ['uid' => $uid, 'posts' => $posts_week, 'limit' => $throttle_week]);
-				$error = DI::l10n()->t('Too Many Requests');
-				$error_description = DI::l10n()->tt("Weekly posting limit of %d post reached. The post was rejected.", "Weekly posting limit of %d posts reached. The post was rejected.", $throttle_week);
+				$error = $this->t('Too Many Requests');
+				$error_description = $this->tt("Weekly posting limit of %d post reached. The post was rejected.", "Weekly posting limit of %d posts reached. The post was rejected.", $throttle_week);
 				$errorobj = new \Friendica\Object\Api\Mastodon\Error($error, $error_description);
-				System::jsonError(429, $errorobj->toArray());
+				$this->jsonError(429, $errorobj->toArray());
 			}
 		}
 
@@ -283,10 +484,10 @@ class BaseApi extends BaseModule
 
 			if ($posts_month > $throttle_month) {
 				Logger::notice('Monthly posting limit reached', ['uid' => $uid, 'posts' => $posts_month, 'limit' => $throttle_month]);
-				$error = DI::l10n()->t('Too Many Requests');
-				$error_description = DI::l10n()->tt('Monthly posting limit of %d post reached. The post was rejected.', 'Monthly posting limit of %d posts reached. The post was rejected.', $throttle_month);
+				$error = $this->t('Too Many Requests');
+				$error_description = $this->tt('Monthly posting limit of %d post reached. The post was rejected.', 'Monthly posting limit of %d posts reached. The post was rejected.', $throttle_month);
 				$errorobj = new \Friendica\Object\Api\Mastodon\Error($error, $error_description);
-				System::jsonError(429, $errorobj->toArray());
+				$this->jsonError(429, $errorobj->toArray());
 			}
 		}
 	}
@@ -317,5 +518,17 @@ class BaseApi extends BaseModule
 		}
 
 		return null;
+	}
+
+	/**
+	 * @param int   $errorno
+	 * @param Error $error
+	 * @return void
+	 * @throws HTTPException\InternalServerErrorException
+	 */
+	protected function logAndJsonError(int $errorno, Error $error)
+	{
+		$this->logger->info('API Error', ['no' => $errorno, 'error' => $error->toArray(), 'method' => $this->args->getMethod(), 'command' => $this->args->getQueryString(), 'user-agent' => $this->server['HTTP_USER_AGENT'] ?? '']);
+		$this->jsonError(403, $error->toArray());
 	}
 }

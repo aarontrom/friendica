@@ -1,6 +1,6 @@
 <?php
 /**
- * @copyright Copyright (C) 2010-2022, the Friendica project
+ * @copyright Copyright (C) 2010-2023, the Friendica project
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -30,6 +30,9 @@ if (!file_exists(__DIR__ . '/vendor/autoload.php')) {
 require __DIR__ . '/vendor/autoload.php';
 
 $dice = (new Dice())->addRules(include __DIR__ . '/static/dependencies.config.php');
+/** @var \Friendica\Core\Addon\Capability\ICanLoadAddons $addonLoader */
+$addonLoader = $dice->create(\Friendica\Core\Addon\Capability\ICanLoadAddons::class);
+$dice = $dice->addRules($addonLoader->getActiveAddonConfig('dependencies'));
 $dice = $dice->addRule(Friendica\App\Mode::class, ['call' => [['determineRunMode', [false, $_SERVER], Dice::CHAIN_CALL]]]);
 
 \Friendica\DI::init($dice);
@@ -45,6 +48,9 @@ $a->runFrontend(
 	$dice->create(\Friendica\Core\PConfig\Capability\IManagePersonalConfigValues::class),
 	$dice->create(\Friendica\Security\Authentication::class),
 	$dice->create(\Friendica\App\Page::class),
+	$dice->create(\Friendica\Content\Nav::class),
+	$dice->create(Friendica\Module\Special\HTTPException::class),
 	new \Friendica\Util\HTTPInputData($_SERVER),
-	$start_time
+	$start_time,
+	$_SERVER
 );
